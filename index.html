@@ -9,6 +9,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>pdfjsWorker = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"; if(window.pdfjsWorker===undefined){ window.pdfjsWorker=pdfjsWorker; } </script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -115,6 +117,19 @@
       <div class="pin-dots" id="authPinDots" style="justify-content:center;"></div>
       <div class="lock-error" id="authError"></div>
       <div class="keypad" id="authKeypad" style="margin:16px auto 0;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- File preview modal -->
+<div class="overlay" id="previewModal">
+  <div class="modal" style="max-width:90vw; max-height:90vh; width:900px;">
+    <div class="modal-head">
+      <div class="modal-title display" id="previewTitle">Preview</div>
+      <button class="modal-close" data-close>&times;</button>
+    </div>
+    <div class="modal-body" id="previewBody" style="overflow-y:auto; max-height:calc(90vh - 100px);">
+      <div id="previewContent" style="text-align:center; padding:40px;">Loading…</div>
     </div>
   </div>
 </div>
