@@ -980,10 +980,12 @@ function viewDocument(id){
   const attSlot = document.getElementById('existingAttachment');
   if(d.attachment){
     attSlot.style.display='block';
+    const isPreviewable = /\.(pdf|jpg|jpeg|png)$/i.test(d.attachment.name||'');
     attSlot.innerHTML = `<div class="doc-row" style="margin-bottom:0;">
       <div class="doc-icon">📎</div>
       <div class="doc-meta"><div class="doc-name">${escapeHtml(d.attachment.name||'Attachment')}</div>
       <div class="doc-cat">${d.attachment.storage==='drive'?'Stored on Google Drive (encrypted)':'Stored locally (encrypted)'}</div></div>
+      ${isPreviewable?`<button class="btn" data-action="preview-attachment" data-id="${d.id}" type="button">👁 Preview</button>`:''}
       <button class="btn" data-action="download-attachment" data-id="${d.id}" type="button">⬇ Download</button>
     </div>`;
   } else {
@@ -1048,6 +1050,87 @@ document.getElementById('saveDocBtn').onclick = async ()=>{
     btn.disabled = false; btn.textContent = originalLabel;
   }
 };
+
+/* ................ preview an attachment (view in modal without download) .............. */
+document.getElementById('previewModal').addEventListener('click', async (e)=>{
+  if(e.target.closest('[data-action="preview-attachment"]')){
+    const id = e.target.closest('[data-action="preview-attachment"]').dataset.id;
+    const d = State.documents.find(x=>x.id===id);
+    if(!d || !d.attachment) return;
+    await previewAttachment(d);
+  }
+});
+
+async function previewAttachment(d){
+  const modal = document.getElementById('previewModal');
+  const content = document.getElementById('previewContent');
+  const title = document.getElementById('previewTitle');
+  const body = document.getElementById('previewBody');
+  
+  title.textContent = escapeHtml(d.attachment.name || 'Attachment');
+  content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Loading…</div>';
+  modal.classList.add('active');
+  
+  try{
+    let blob;
+    const fileName = d.attachment.name || 'attachment';
+    
+    if(d.attachment.storage === 'drive'){
+      content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Downloading from Google Drive…</div>';
+      const cipherBuf = await Drive.download(d.attachment.driveFileId);
+      const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
+      blob = new Blob([plainBuf], {type: d.attachment.type || 'application/octet-stream'});
+    } else {
+      const res = await fetch(d.attachment.data);
+      blob = await res.blob();
+    }
+    
+    if(/\.pdf$/i.test(fileName) && window.pdfjsLib){
+      await renderPdfPreview(blob, body);
+    } else if(/\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)){
+      renderImagePreview(blob, body);
+    } else {
+      content.innerHTML = `<div style="text-align:center; padding:40px;"><div style="color:var(--brass); font-size:40px; margin-bottom:12px;">📄</div><div style="color:var(--bone);">Cannot preview this file type</div><div style="color:var(--steel); font-size:12px; margin-top:8px;">${escapeHtml(fileName)}</div></div>`;
+    }
+  }catch(err){
+    console.error('Preview failed:', err);
+    content.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);"><div style="margin-bottom:10px;">Could not load preview</div><div style="font-size:12px; color:var(--steel);">${escapeHtml(err.message)}</div></div>`;
+  }
+}
+
+async function renderPdfPreview(blob, container){
+  container.innerHTML = '<div id="pdf-viewer" style="height:100%; display:flex; flex-direction:column;"></div>';
+  const viewer = document.getElementById('pdf-viewer');
+  const arrayBuf = await blob.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({data: arrayBuf}).promise;
+  viewer.innerHTML = `<div style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center;"><div style="font-size:12px; color:var(--steel);">Page <span id="pdf-page">1</span> of ${pdf.numPages}</div><div style="display:flex; gap:6px;"><button class="btn" id="pdf-prev" style="padding:6px 10px; font-size:11px;">← Prev</button><button class="btn" id="pdf-next" style="padding:6px 10px; font-size:11px;">Next →</button></div></div><div id="pdf-canvas-container" style="flex:1; overflow-y:auto; display:flex; align-items:center; justify-content:center;"></div>`;
+  let currentPage = 1;
+  const renderPage = async (pageNum)=>{
+    const page = await pdf.getPage(pageNum);
+    const scale = 1.5;
+    const viewport = page.getViewport({scale});
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({canvasContext:ctx, viewport}).promise;
+    const container = document.getElementById('pdf-canvas-container');
+    container.innerHTML = '';
+    canvas.style.maxWidth = '100%';
+    canvas.style.boxShadow = 'var(--shadow)';
+    container.appendChild(canvas);
+    document.getElementById('pdf-page').textContent = pageNum;
+  };
+  renderPage(1);
+  document.getElementById('pdf-prev').onclick = ()=>{ if(currentPage>1) renderPage(--currentPage); };
+  document.getElementById('pdf-next').onclick = ()=>{ if(currentPage<pdf.numPages) renderPage(++currentPage); };
+}
+
+function renderImagePreview(blob, container){
+  const url = URL.createObjectURL(blob);
+  container.innerHTML = `<div style="padding:20px; text-align:center;"><img src="${url}" style="max-width:100%; max-height:100%; border-radius:12px; box-shadow:var(--shadow);"></div>`;
+  setTimeout(()=>URL.revokeObjectURL(url), 300000);
+}
 
 /* ---------------- download an attachment (decrypt + save-as) ---------------- */
 document.getElementById('existingAttachment').addEventListener('click', async (e)=>{
