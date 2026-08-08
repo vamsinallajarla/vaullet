@@ -980,8 +980,19 @@ function wireContentEvents(){
   document.querySelectorAll('[data-action="new-cat"]').forEach(b=>b.onclick=()=>document.getElementById('catModal').classList.add('active'));
   document.querySelectorAll('[data-action="fav"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); toggleFavorite(b.dataset.id); });
   document.querySelectorAll('[data-action="reveal"]').forEach(b=>b.onclick=()=>requestReveal(b.dataset.id));
-  document.querySelectorAll('[data-action="file-menu"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openFileMenu(b.dataset.id); });
-  document.querySelectorAll('.doc-row[data-action="open"]').forEach(r=>r.onclick=(e)=>{ if(e.target.closest('[data-action="fav"]') || e.target.closest('[data-action="file-menu"]')) return; viewDocument(r.dataset.id); });
+  document.querySelectorAll('[data-action="file-menu"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); viewDocument(b.dataset.id); });
+  document.querySelectorAll('.doc-row[data-action="open"]').forEach(r=>r.onclick=(e)=>{ 
+    if(e.target.closest('[data-action="fav"]') || e.target.closest('[data-action="file-menu"]')) return;
+    const id = r.dataset.id;
+    const doc = State.documents.find(d=>d.id===id);
+    if(doc && doc.attachment){
+      // Has attachment - preview it
+      previewAttachment(id, 0);
+    } else {
+      // No attachment - open edit modal
+      viewDocument(id);
+    }
+  });
 
   const search = document.getElementById('searchInput');
   if(search) search.oninput = ()=>runSearch(search.value);
