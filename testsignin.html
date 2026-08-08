@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vaullet - Sign In Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      padding: 40px 20px;
+      min-height: 100vh;
+    }
+    .container { max-width: 600px; margin: 0 auto; }
+    h1 { margin-bottom: 30px; color: #daa520; }
+    .test-box {
+      background: #222;
+      border: 1px solid #333;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .pass { color: #4caf50; }
+    .fail { color: #f44336; }
+    .warn { color: #ff9800; }
+    button {
+      background: #daa520;
+      color: #000;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-top: 20px;
+      width: 100%;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .info {
+      background: #263238;
+      border-left: 4px solid #2196f3;
+      padding: 15px;
+      margin-top: 20px;
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔒 Vaullet Sign-In Test</h1>
+    
+    <h3>Configuration Check:</h3>
+    <div class="test-box" id="results"></div>
+    
+    <button id="testBtn" onclick="runTests()">Run Diagnostic Test</button>
+    <button id="signInBtn" onclick="testSignIn()" style="margin-top: 10px;" disabled>Test Sign In</button>
+    
+    <div class="info">
+      <strong>📝 Instructions:</strong><br>
+      1. Click "Run Diagnostic Test" to check your setup<br>
+      2. All checks should show <span class="pass">✓ PASS</span><br>
+      3. If any show <span class="fail">✗ FAIL</span>, fix that first<br>
+      4. Once all pass, click "Test Sign In" to test Google login<br>
+      5. Copy any error messages and share them
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
+  <script src="firebase_config.js"></script>
+
+  <script>
+    function log(message) {
+      const results = document.getElementById('results');
+      results.innerHTML += message + '<br>';
+      console.log(message);
+    }
+
+    function runTests() {
+      document.getElementById('results').innerHTML = '';
+      const btn = document.getElementById('testBtn');
+      btn.disabled = true;
+      btn.textContent = 'Running...';
+
+      // Test 1: Firebase SDK
+      if (window.firebase) {
+        log('<span class="pass">✓ PASS</span> Firebase SDK loaded');
+      } else {
+        log('<span class="fail">✗ FAIL</span> Firebase SDK not loaded');
+        btn.disabled = false;
+        btn.textContent = 'Run Diagnostic Test';
+        return;
+      }
+
+      // Test 2: Firebase Config
+      if (window.VAULLET_FIREBASE_CONFIG && window.VAULLET_FIREBASE_CONFIG.apiKey) {
+        log('<span class="pass">✓ PASS</span> Firebase config loaded');
+        log('  - projectId: ' + window.VAULLET_FIREBASE_CONFIG.projectId);
+      } else {
+        log('<span class="fail">✗ FAIL</span> Firebase config missing or invalid');
+        log('  Check firebase_config.js file exists and has credentials');
+        btn.disabled = false;
+        btn.textContent = 'Run Diagnostic Test';
+        return;
+      }
+
+      // Test 3: Initialize Firebase
+      try {
+        const app = firebase.initializeApp(window.VAULLET_FIREBASE_CONFIG);
+        const auth = firebase.auth();
+        log('<span class="pass">✓ PASS</span> Firebase Auth initialized');
+
+        // Test 4: Check Google provider
+        setTimeout(() => {
+          if (auth && auth.currentUser !== undefined) {
+            log('<span class="pass">✓ PASS</span> Firebase Auth ready');
+          } else {
+            log('<span class="warn">⚠ WARN</span> Firebase Auth not fully ready');
+          }
+
+          // Test 5: Check persistence
+          auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+            .then(() => log('<span class="pass">✓ PASS</span> Auth persistence enabled'))
+            .catch(e => log('<span class="fail">✗ FAIL</span> Persistence error: ' + e.message));
+
+          log('<br><strong style="color: #4caf50;">✓ All checks passed!</strong> You can now test Sign In.');
+          document.getElementById('signInBtn').disabled = false;
+          btn.disabled = false;
+          btn.textContent = 'Run Diagnostic Test Again';
+        }, 1000);
+      } catch (e) {
+        log('<span class="fail">✗ FAIL</span> Firebase init error: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Run Diagnostic Test';
+      }
+    }
+
+    async function testSignIn() {
+      const btn = document.getElementById('signInBtn');
+      btn.disabled = true;
+      btn.textContent = 'Starting sign-in...';
+
+      try {
+        const auth = firebase.auth();
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.addScope('profile');
+        provider.addScope('email');
+        
+        log('<br><strong>Sign-In Test Started...</strong>');
+        log('Attempting redirect to Google...');
+
+        const result = await auth.signInWithRedirect(provider);
+        log('<span class="pass">✓ PASS</span> Redirect initiated');
+      } catch (e) {
+        log('<span class="fail">✗ FAIL</span> Sign-in error:');
+        log(e.message);
+        log('<br>Copy this error and share it for help.');
+        btn.disabled = false;
+        btn.textContent = 'Test Sign In';
+      }
+    }
+  </script>
+</body>
+</html>
