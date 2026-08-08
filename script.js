@@ -347,22 +347,30 @@ let pinTarget = 6;
 let pinMode = null; // 'setup' | 'unlock'
 
 async function initAuthScreen(){
-  // Create the PIN entry screen HTML
+  // Create mobile-optimized PIN entry screen HTML
   document.getElementById('lock').innerHTML = `
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px;">
-      <div style="width:100%; max-width:400px;">
-        <div class="modal-title display" id="lockTitle" style="margin-bottom:10px; text-align:center; font-size:24px;">Set your vault PIN</div>
-        <div class="help-text" id="lockSub" style="margin-bottom:40px; text-align:center;">Welcome! Choose a 6-digit PIN to encrypt your vault.</div>
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:16px 20px; width:100%; max-width:100%;">
+      <div style="width:100%; max-width:100%; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
         
-        <div id="dialContainer" style="display:flex; justify-content:center; margin-bottom:40px;">
-          <canvas id="pinDial" width="200" height="200"></canvas>
+        <!-- Title -->
+        <div class="modal-title display" id="lockTitle" style="margin-bottom:8px; text-align:center; font-size:20px; line-height:1.3;">Set your vault PIN</div>
+        
+        <!-- Subtitle -->
+        <div class="help-text" id="lockSub" style="margin-bottom:24px; text-align:center; font-size:13px; line-height:1.4;">Welcome! Choose a 6-digit PIN to encrypt your vault.</div>
+        
+        <!-- Dial (smaller for mobile) -->
+        <div id="dialContainer" style="display:flex; justify-content:center; margin-bottom:24px; flex-shrink:0;">
+          <canvas id="pinDial" width="140" height="140" style="width:140px; height:140px;"></canvas>
         </div>
         
-        <div id="pinDots" style="display:flex; justify-content:center; gap:10px; margin-bottom:30px;"></div>
+        <!-- PIN Dots -->
+        <div id="pinDots" style="display:flex; justify-content:center; gap:8px; margin-bottom:28px; flex-shrink:0;"></div>
         
-        <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:20px;"></div>
+        <!-- Keypad (larger buttons for touch) -->
+        <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:20px; width:100%; max-width:280px; flex-shrink:0;"></div>
         
-        <div id="lockError" class="help-text" style="color:var(--alert); text-align:center; min-height:20px;"></div>
+        <!-- Error message -->
+        <div id="lockError" class="help-text" style="color:var(--alert); text-align:center; min-height:18px; font-size:12px;"></div>
       </div>
     </div>
   `;
