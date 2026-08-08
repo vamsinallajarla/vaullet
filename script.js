@@ -1317,28 +1317,18 @@ function resetInactivity(){
     return;
   }
   
-  // Handle redirect result from Google Sign-In
-  try{
-    const result = await Cloud.auth.getRedirectResult();
-    if(result.user){
-      console.log('User signed in from redirect:', result.user.email);
-    }
-  }catch(e){
-    console.warn('Redirect result error (usually normal):', e.message);
-  }
-  
-  await new Promise(r=>setTimeout(r,500));
-  
+  // Set up auth state listener FIRST (critical for redirect handling)
   Cloud.onAuthStateChanged(async (user)=>{
     console.log('Auth state changed:', user ? user.email : 'signed out');
     if(user){
       State.googleUser = user;
+      console.log('User signed in:', user.email);
       document.getElementById('lock').style.display='flex';
       document.getElementById('app').classList.remove('active');
       await initAuthScreen();
       resetInactivity();
     } else {
-      // Not signed in
+      // Not signed in - show login screen
       document.getElementById('lock').innerHTML = `<div style="text-align:center;">
         <div class="modal-title display" style="margin-bottom:20px; font-size:24px;">Vaullet</div>
         <div class="help-text" style="margin-bottom:30px;">Secure personal vault<br>Google Account + Encrypted PIN</div>
@@ -1382,4 +1372,18 @@ function resetInactivity(){
       }
     }
   });
+  
+  // Now handle redirect result AFTER listener is set up
+  try{
+    console.log('Checking for redirect result...');
+    const result = await Cloud.auth.getRedirectResult();
+    if(result && result.user){
+      console.log('✅ User authenticated from redirect:', result.user.email);
+      // Auth state listener will handle login - no need to do it here
+    } else {
+      console.log('No redirect result (normal on first load)');
+    }
+  }catch(e){
+    console.error('Redirect result error:', e.message);
+  }
 })();
