@@ -271,6 +271,23 @@ const Drive = {
     const data = await res.json();
     return data.id;
   },
+  async uploadRaw(fileArrayBuffer, filename){
+    // Upload raw (unencrypted) file to Drive
+    const token = localStorage.getItem('vaullet_google_access_token');
+    console.log('✅ [DRIVE] Uploading raw file (unencrypted):', filename);
+    const parentFolderId = await this.ensureVaultFolder();
+    const metadata = {name: filename, mimeType: 'application/octet-stream', parents:[parentFolderId]};
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+    form.append('file', new Blob([fileArrayBuffer]));
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+      method:'POST', headers:{Authorization:'Bearer '+token}, body:form
+    });
+    if(!res.ok) throw new Error(`Drive upload failed (HTTP ${res.status})`);
+    const data = await res.json();
+    console.log('✅ [DRIVE] Raw file uploaded:', filename, '- ID:', data.id);
+    return data.id;
+  },
   async download(fileId){
     try{
       // Use stored Google access token for Drive API
@@ -313,8 +330,9 @@ const Drive = {
       if(!res.ok) throw new Error(`Drive list failed (HTTP ${res.status})`);
       const data = await res.json();
       
-      const files = (data.files||[]).filter(f => f.name.endsWith('.enc'));
-      console.log(`✅ [DRIVE SYNC] Found ${files.length} encrypted files in vault`);
+      // Accept all files (encrypted .enc, PDFs, images, etc.) - exclude folders
+      const files = (data.files||[]).filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
+      console.log(`✅ [DRIVE SYNC] Found ${files.length} files in vault (including: .enc, PDF, images, etc.)`);
       return files;
     }catch(e){
       console.error('❌ [DRIVE SYNC] Failed to list files:', e.message);
@@ -334,18 +352,31 @@ const Drive = {
       let synced = 0;
       for(const driveFile of driveFiles){
         // Check if file already exists in app
-        const fileName = driveFile.name.replace(/^vaullet_/, '').replace(/\.enc$/, '');
         const exists = State.documents.some(d => 
           d.attachment && d.attachment.driveFileId === driveFile.id
         );
         
         if(!exists){
+          // Extract file name
+          let fileName = driveFile.name;
+          
+          // For encrypted files, remove vaullet_ prefix and .enc extension
+          if(fileName.startsWith('vaullet_') && fileName.endsWith('.enc')){
+            fileName = fileName.replace(/^vaullet_/, '').replace(/\.enc$/, '');
+          }
+          
+          // Determine file type from mime type
+          let category = 'Personal';
+          if(driveFile.mimeType.startsWith('image/')) category = 'Personal';
+          else if(driveFile.mimeType === 'application/pdf') category = 'Personal';
+          else if(driveFile.mimeType.includes('word') || driveFile.mimeType.includes('document')) category = 'Personal';
+          
           // Add new document from Drive file
           const doc = {
             id: Math.random().toString(36).substr(2,9),
             name: fileName,
             type: 'document',
-            category: 'Personal',
+            category: category,
             attachment: {
               name: driveFile.name,
               driveFileId: driveFile.id,
@@ -355,14 +386,30 @@ const Drive = {
             createdAt: new Date(driveFile.createdTime).getTime(),
             updatedAt: new Date(driveFile.modifiedTime).getTime(),
             favorite: false,
-            tags: [],
+            tags: ['synced-from-drive'],
             notes: 'Synced from Google Drive'
           };
           
           State.documents.push(doc);
-          await LocalDB.saveDocument(doc);
+          
+          // Save to LocalDB (metadata only, file is on Drive)
+          try{
+            const payload = {...doc}; 
+            delete payload.id; 
+            delete payload.favorite; 
+            delete payload.updatedAt;
+            const {iv, ct} = await Crypto.encryptStr(State.masterKey, JSON.stringify(payload));
+            const deviceName = await LocalDB.getConfig('deviceName') || 'My Device';
+            const encItem = {id: doc.id, iv, ct, category: doc.category, type: doc.type, favorite: false, updatedAt: Date.now(), deviceName};
+            await LocalDB.putItem(encItem);
+            await Cloud.push(encItem);
+            console.log(`✅ [DRIVE SYNC] Saved to LocalDB & Firestore: ${fileName}`);
+          }catch(e){
+            console.warn('⚠️ [DRIVE SYNC] Could not save metadata:', e.message);
+          }
+          
           synced++;
-          console.log(`✅ [DRIVE SYNC] Added: ${fileName}`);
+          console.log(`✅ [DRIVE SYNC] Added: ${fileName} (from Drive)`);
         }
       }
       
@@ -765,8 +812,20 @@ async function previewAttachment(id){
     
     if(d.attachment.storage === 'drive'){
       content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Downloading from Google Drive…</div>';
-      const cipherBuf = await Drive.download(d.attachment.driveFileId);
-      const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
+      const fileData = await Drive.download(d.attachment.driveFileId);
+      
+      // Check if file is encrypted (has IV) or raw
+      let plainBuf;
+      if(d.attachment.iv){
+        // File is encrypted - decrypt it
+        console.log('🔓 [PREVIEW] Decrypting file:', fileName);
+        plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, fileData);
+      } else {
+        // File is unencrypted - use as-is
+        console.log('📄 [PREVIEW] File is unencrypted, using raw:', fileName);
+        plainBuf = fileData;
+      }
+      
       blob = new Blob([plainBuf], {type: d.attachment.type || 'application/octet-stream'});
     } else if(d.attachment.data){
       const res = await fetch(d.attachment.data);
@@ -1174,12 +1233,21 @@ function wireContentEvents(){
       const d = State.documents.find(x=>x.id===id);
       if(d && d.attachment){
         downloadBtn.disabled = true;
-        downloadBtn.textContent = 'Decrypting…';
+        downloadBtn.textContent = d.attachment.iv ? 'Decrypting…' : 'Downloading…';
         try{
           let blob;
           if(d.attachment.storage === 'drive'){
-            const cipherBuf = await Drive.download(d.attachment.driveFileId);
-            const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
+            const fileData = await Drive.download(d.attachment.driveFileId);
+            let plainBuf;
+            if(d.attachment.iv){
+              // File is encrypted - decrypt it
+              console.log('🔓 [DOWNLOAD] Decrypting:', d.attachment.name);
+              plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, fileData);
+            } else {
+              // File is unencrypted - use as-is
+              console.log('📥 [DOWNLOAD] File is unencrypted:', d.attachment.name);
+              plainBuf = fileData;
+            }
             blob = new Blob([plainBuf], {type:d.attachment.type || 'application/octet-stream'});
           } else if(d.attachment.data){
             const res = await fetch(d.attachment.data);
@@ -1277,12 +1345,12 @@ document.getElementById('saveDocBtn').onclick = async ()=>{
       if(file.size > 100 * 1024 * 1024) throw new Error(`"${file.name}" is ${(file.size/1024/1024).toFixed(1)}MB — please attach files under 100MB.`);
       const driveReady = window.VAULLET_GOOGLE_CONFIG && window.VAULLET_GOOGLE_CONFIG.clientId && await Drive.ensureReady();
       if(driveReady){
-        btn.textContent = 'Encrypting…';
-        const rawBytes = await file.arrayBuffer();
-        const {iv, ciphertext} = await Crypto.encryptBytes(State.masterKey, rawBytes);
+        // Upload raw file to Drive (NO encryption)
         btn.textContent = 'Uploading to Drive…';
-        const driveFileId = await Drive.upload(ciphertext, file.name);
-        attachment = {storage:'drive', driveFileId, name:file.name, type:file.type, size:file.size, iv};
+        const rawBytes = await file.arrayBuffer();
+        const driveFileId = await Drive.uploadRaw(rawBytes, file.name);
+        attachment = {storage:'drive', driveFileId, name:file.name, type:file.type, size:file.size};
+        console.log('✅ [UPLOAD] File uploaded to Drive unencrypted');
         btn.textContent = 'Saving…';
       } else {
         attachment = await fileToBase64(file);
@@ -1311,7 +1379,7 @@ document.getElementById('saveDocBtn').onclick = async ()=>{
     } else if(pushResult && pushResult.reason === 'error'){
       toast('Saved locally. Firestore sync failed: ' + pushResult.message);
     } else {
-      toast('Saved — encrypted before storage.');
+      toast('Saved to Google Drive (unencrypted).');
     }
   }catch(e){
     console.error('Save to vault failed:', e);
