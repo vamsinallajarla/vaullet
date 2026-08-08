@@ -62,14 +62,15 @@ input,select,textarea{font-family:inherit;}
 .pin-dots{display:flex; gap:14px; margin:6px 0;}
 .pin-dot{width:12px; height:12px; border-radius:50%; border:1.5px solid var(--steel); transition:.15s;}
 .pin-dot.filled{background:var(--brass); border-color:var(--brass);}
-.keypad{display:grid; grid-template-columns:repeat(3,64px); gap:12px;}
+.keypad{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; width:100%; max-width:280px;}
 .keypad button{
-  width:64px; height:64px; border-radius:50%; border:1px solid var(--hairline);
-  background:var(--charcoal); color:var(--bone); font-size:19px; font-weight:500;
+  aspect-ratio:1; width:100%; border-radius:50%; border:1.5px solid var(--hairline);
+  background:var(--charcoal); color:var(--bone); font-size:18px; font-weight:500;
   display:flex; align-items:center; justify-content:center; transition:.15s;
+  min-height:60px;
 }
 .keypad button:active{background:var(--brass-soft); border-color:var(--brass); transform:scale(.95);}
-.keypad button.ghost{border:none; background:transparent; color:var(--steel); font-size:13px;}
+.keypad button.ghost{border:none; background:transparent; color:var(--steel); font-size:13px; min-height:auto;}
 .bio-btn{
   border:1px solid var(--brass); color:var(--brass); background:transparent;
   padding:10px 22px; border-radius:100px; font-size:13.5px; font-weight:600;
@@ -272,4 +273,99 @@ input:checked + .slider::before{transform:translateX(18px); background:var(--ink
   .content{padding:20px 16px 60px;}
   .topbar{padding:18px 16px;}
 }
+
+/* ============ MOBILE BOTTOM NAVIGATION ============ */
+.mobile-nav{
+  display:none; position:fixed; bottom:0; left:0; right:0;
+  background:var(--charcoal); border-top:1px solid var(--hairline);
+  height:60px; z-index:999; padding-bottom:max(0, env(safe-area-inset-bottom));
+}
+.mobile-nav-btn{
+  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:4px; border:none; background:none; color:var(--steel);
+  font-size:9.5px; cursor:pointer; transition:.15s; height:60px;
+}
+.mobile-nav-btn.active{color:var(--brass); background:var(--brass-soft);}
+.mobile-nav-btn svg{width:18px; height:18px;}
+
+@media (max-width:768px){
+  .mobile-nav{display:flex;}
+}
+@media (max-width:768px){
+  /* Hide rail sidebar on mobile */
+  .rail{display:none;}
+  
+  /* Full-width app layout */
+  #app{flex-direction:column;}
+  main{height:auto; min-height:100vh; overflow-y:auto;}
+  
+  /* Optimize topbar */
+  .topbar{padding:16px 16px; position:sticky; top:0;}
+  .page-title{font-size:18px;}
+  .page-sub{font-size:11.5px;}
+  .topbar-actions{gap:8px;}
+  
+  /* Optimize content spacing */
+  .content{padding:16px 16px 80px;}
+  
+  /* Optimize buttons */
+  .btn{padding:10px 14px; font-size:13px;}
+  .btn-brass{padding:12px 20px; font-size:14px;}
+  
+  /* Optimize modals for mobile */
+  .modal{max-width:calc(100vw - 20px); max-height:85vh;}
+  
+  /* Optimize grid */
+  .grid{grid-template-columns:1fr;}
+  .doc-grid,.wallet-grid{grid-template-columns:1fr;}
+  
+  /* PIN screen optimization */
+  #lock{padding:12px 16px; gap:16px;}
+  .lock-title{font-size:18px;}
+  .lock-sub{font-size:12.5px; max-width:280px;}
+  
+  /* Keypad on mobile */
+  .keypad{gap:8px; max-width:calc(100vw - 32px);}
+  
+  /* PIN dots */
+  .pin-dots{gap:10px;}
+  .pin-dot{width:10px; height:10px;}
+  
+  /* Dial */
+  .dial{width:100px; height:100px;}
+  
+  /* Card styling */
+  .stat-card{padding:16px 12px; font-size:13px;}
+  .stat-num{font-size:24px;}
+  .stat-label{font-size:11px;}
+  
+  /* Document row */
+  .doc-row{padding:12px 14px; gap:10px;}
+  .doc-icon{font-size:18px;}
+  .doc-name{font-size:13px;}
+  .doc-cat{font-size:11px;}
+}
+
+/* Extra small screens (iPhone SE, etc.) */
+@media (max-width:380px){
+  .keypad button{min-height:56px;}
+  .page-title{font-size:16px;}
+  .lock-title{font-size:16px;}
+  .modal{max-width:calc(100vw - 16px);}
+  .content{padding:12px 12px 80px;}
+  .topbar{padding:12px;}
+  
+  /* Shrink dial for tiny screens */
+  #dialContainer canvas{width:120px !important; height:120px !important;}
+}
+
+/* iPhone landscape */
+@media (max-width:768px) and (orientation:landscape){
+  #lock{min-height:auto; padding:10px 16px;}
+  #dialContainer{margin-bottom:12px;}
+  #pinDots{margin-bottom:12px;}
+  .lock-title{font-size:16px; margin-bottom:4px;}
+  .lock-sub{font-size:11px; margin-bottom:12px;}
+}
+
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
