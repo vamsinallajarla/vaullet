@@ -295,13 +295,83 @@ const Drive = {
       throw e;
     }
   },
-  async remove(fileId){
+  async listVaultFiles(){
     try{
+      const vaultFolderId = await this.ensureVaultFolder();
       const token = localStorage.getItem('vaullet_google_access_token');
-      if(token){
-        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {method:'DELETE', headers:{Authorization:'Bearer '+token}});
+      
+      if(!token){
+        console.warn('⚠️ [DRIVE] No access token, cannot sync');
+        return [];
       }
-    }catch(e){ console.warn('Drive delete failed:', e.message); }
+      
+      const q = `'${vaultFolderId}' in parents and trashed=false`;
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,createdTime,modifiedTime,size)&pageSize=1000`, {
+        headers:{Authorization:'Bearer '+token}
+      });
+      
+      if(!res.ok) throw new Error(`Drive list failed (HTTP ${res.status})`);
+      const data = await res.json();
+      
+      const files = (data.files||[]).filter(f => f.name.endsWith('.enc'));
+      console.log(`✅ [DRIVE SYNC] Found ${files.length} encrypted files in vault`);
+      return files;
+    }catch(e){
+      console.error('❌ [DRIVE SYNC] Failed to list files:', e.message);
+      return [];
+    }
+  },
+  async syncFromDrive(){
+    try{
+      console.log('🔄 [DRIVE SYNC] Starting sync from Google Drive...');
+      const driveFiles = await this.listVaultFiles();
+      
+      if(driveFiles.length === 0){
+        console.log('ℹ️ [DRIVE SYNC] No files to sync');
+        return 0;
+      }
+      
+      let synced = 0;
+      for(const driveFile of driveFiles){
+        // Check if file already exists in app
+        const fileName = driveFile.name.replace(/^vaullet_/, '').replace(/\.enc$/, '');
+        const exists = State.documents.some(d => 
+          d.attachment && d.attachment.driveFileId === driveFile.id
+        );
+        
+        if(!exists){
+          // Add new document from Drive file
+          const doc = {
+            id: Math.random().toString(36).substr(2,9),
+            name: fileName,
+            type: 'document',
+            category: 'Personal',
+            attachment: {
+              name: driveFile.name,
+              driveFileId: driveFile.id,
+              storage: 'drive',
+              size: driveFile.size||0
+            },
+            createdAt: new Date(driveFile.createdTime).getTime(),
+            updatedAt: new Date(driveFile.modifiedTime).getTime(),
+            favorite: false,
+            tags: [],
+            notes: 'Synced from Google Drive'
+          };
+          
+          State.documents.push(doc);
+          await LocalDB.saveDocument(doc);
+          synced++;
+          console.log(`✅ [DRIVE SYNC] Added: ${fileName}`);
+        }
+      }
+      
+      console.log(`✅ [DRIVE SYNC] Sync complete: ${synced} new files`);
+      return synced;
+    }catch(e){
+      console.error('❌ [DRIVE SYNC] Sync failed:', e.message);
+      return 0;
+    }
   }
 };
 
@@ -528,6 +598,16 @@ async function loadVaultData(){
       const data = JSON.parse(json);
       State.documents.push({...data, id:enc.id, favorite:!!enc.favorite, updatedAt:enc.updatedAt, deviceName:enc.deviceName});
     }catch(e){ console.warn('Could not decrypt item', enc.id); }
+  }
+  
+  // Auto-sync files from Google Drive vault folder
+  if(State.googleUser && localStorage.getItem('vaullet_google_access_token')){
+    try{
+      const synced = await Drive.syncFromDrive();
+      if(synced > 0) toast(`✅ Synced ${synced} file${synced!==1?'s':''} from Drive`);
+    }catch(e){
+      console.warn('Auto-sync failed:', e.message);
+    }
   }
 }
 
@@ -842,6 +922,7 @@ function renderHome(){
   <div style="display:flex; gap:10px; margin-top:24px; flex-wrap:wrap;">
     <button class="btn btn-brass" data-action="add-doc">＋ Upload</button>
     <button class="btn" data-action="scan">📷 Scan</button>
+    <button class="btn" data-action="sync-drive">🔄 Sync Drive</button>
     <button class="btn" data-action="goto-search">🔍 Search</button>
     <button class="btn" data-action="add-card">💳 Add card</button>
   </div>
@@ -1003,6 +1084,15 @@ function wireContentEvents(){
   document.querySelectorAll('[data-action="add-doc"]').forEach(b=>b.onclick=()=>openDocModal('document'));
   document.querySelectorAll('[data-action="add-card"]').forEach(b=>b.onclick=()=>openDocModal('card'));
   document.querySelectorAll('[data-action="scan"]').forEach(b=>b.onclick=()=>{ openDocModal('document'); setTimeout(()=>document.getElementById('f_file').click(),200); });
+  document.querySelectorAll('[data-action="sync-drive"]').forEach(b=>b.onclick=async ()=>{ 
+    b.disabled=true; 
+    b.textContent='🔄 Syncing...'; 
+    const count = await Drive.syncFromDrive();
+    render();
+    b.disabled=false; 
+    b.textContent='🔄 Sync Drive';
+    toast(`Synced ${count} file${count!==1?'s':''} from Drive`);
+  });
   document.querySelectorAll('[data-action="goto-search"]').forEach(b=>b.onclick=()=>navigate('search'));
   document.querySelectorAll('[data-action="goto-alerts"]').forEach(b=>b.onclick=()=>navigate('notifications'));
   document.querySelectorAll('[data-action="filter-cat"]').forEach(b=>b.onclick=()=>{ State.activeCategory=b.dataset.cat; render(); });
@@ -1495,4 +1585,3 @@ function resetInactivity(){
   
   console.log('🔍 [BOOT] Boot sequence complete, auth listener active');
 })();
-
