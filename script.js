@@ -222,7 +222,7 @@ const Drive = {
     });
   },
   async findOrCreateFolder(parentId, folderName){
-    const token = await this.ensureToken();
+    const token = await State.googleUser.getIdToken();
     const q = `name='${folderName.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
     const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
       headers:{Authorization:'Bearer '+token}
@@ -257,7 +257,8 @@ const Drive = {
     }
   },
   async upload(encryptedArrayBuffer, filename){
-    const token = await this.ensureToken();
+    const token = await State.googleUser.getIdToken();
+    console.log('✅ [DRIVE] Using authenticated token for upload');
     const parentFolderId = await this.ensureVaultFolder();
     const metadata = {name: `vaullet_${filename}.enc`, mimeType: 'application/octet-stream', parents:[parentFolderId]};
     const form = new FormData();
@@ -271,33 +272,25 @@ const Drive = {
     return data.id;
   },
   async download(fileId){
-    let token = localStorage.getItem('vaullet_drive_token');
-    
-    // If no cached token, request one
-    if(!token){
-      console.log('⚠️ [DRIVE] No cached token, requesting authorization...');
-      token = await this.ensureToken();
-    } else {
-      console.log('✅ [DRIVE] Using cached token');
+    try{
+      // Get token from already-authenticated Firebase user (no auth popup!)
+      const token = await State.googleUser.getIdToken();
+      console.log('✅ [DRIVE] Using authenticated Firebase token (no popup)');
+      
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, 
+        {headers:{Authorization:'Bearer '+token}}
+      );
+      
+      if(!res.ok) throw new Error(`Drive download failed (HTTP ${res.status})`);
+      return await res.arrayBuffer();
+    }catch(e){
+      console.error('❌ [DRIVE] Download failed:', e.message);
+      throw e;
     }
-    
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+token}});
-    if(!res.ok){
-      // If cached token expired, get a new one
-      if(res.status === 401){
-        console.log('🔄 [DRIVE] Token expired, requesting new one...');
-        token = await this.ensureToken();
-        const retryRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+token}});
-        if(!retryRes.ok) throw new Error(`Drive download failed (HTTP ${retryRes.status})`);
-        return await retryRes.arrayBuffer();
-      }
-      throw new Error(`Drive download failed (HTTP ${res.status})`);
-    }
-    return await res.arrayBuffer();
   },
   async remove(fileId){
     try{
-      const token = await this.ensureToken(false);
+      const token = await State.googleUser.getIdToken();
       await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {method:'DELETE', headers:{Authorization:'Bearer '+token}});
     }catch(e){ console.warn('Drive delete failed:', e.message); }
   }
