@@ -1,44 +1,31 @@
-/* =========================================================================
-   VAULLET — Digital Document & Card Vault
-   Client-side encryption (WebCrypto AES-256-GCM), PIN + WebAuthn biometric
-   unlock, IndexedDB local encrypted cache, optional Firebase Firestore sync
-   (ciphertext-only). See README for setup, Firestore rules, and threat model.
-   ========================================================================= */
+/* VAULLET — Google Account + PIN Authentication
+   Complete rewrite with Firebase Auth integration
+*/
 
 const DEFAULT_CATEGORIES = ["Identity","Banking","Cards","Insurance","Vehicle","Education","Employment","Medical","Tax","Personal"];
 const ICONS = {Identity:"🪪",Banking:"🏦",Cards:"💳",Insurance:"🛡️",Vehicle:"🚗",Education:"🎓",Employment:"💼",Medical:"⚕️",Tax:"📄",Personal:"🗂️"};
 
-/* ---------------- tiny state ---------------- */
 const State = {
   unlocked:false,
   pinBuffer:"",
-  mode:null,           // 'setup' | 'unlock'
-  masterKey:null,       // CryptoKey, session-only, never persisted
+  masterKey:null,
+  googleUser:null,
   categories:[...DEFAULT_CATEGORIES],
-  documents:[],         // decrypted-in-memory session objects
+  documents:[],
   favorites:new Set(),
   activeTab:"home",
   activeCategory:"All",
   theme:"dark",
-  reminders:{},          // itemId -> days
-  firebaseReady:false,
-  db:null,
-  authCallback:null,
   reauthTarget:null,
 };
 
-/* ---------------- toast ---------------- */
 function toast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg; t.classList.add('show');
   clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2400);
 }
 
-/* =========================================================================
-   CRYPTO MODULE — AES-256-GCM, PBKDF2 key derivation from PIN.
-   The PIN itself is NEVER stored. Only a random salt + a non-reversible
-   verifier (derived key's hash) are kept, to check unlock attempts.
-   ========================================================================= */
+/* ===== CRYPTO MODULE ===== */
 const Crypto = {
   enc:new TextEncoder(), dec:new TextDecoder(),
 
@@ -66,8 +53,6 @@ const Crypto = {
     return this.dec.decode(pt);
   },
   async encryptBytes(key, arrayBuffer){
-    // For file attachments — keeps ciphertext as raw bytes (not base64) so
-    // large files aren't bloated ~33% before upload to Drive.
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, key, arrayBuffer);
     return {iv:this.bufToB64(iv), ciphertext: ct};
@@ -77,12 +62,9 @@ const Crypto = {
     return await crypto.subtle.decrypt({name:"AES-GCM", iv}, key, ciphertextArrayBuffer);
   },
   bufToB64(buf){
-    // Chunked conversion — avoids "Maximum call stack size exceeded" on large
-    // buffers (spreading a big Uint8Array into String.fromCharCode blows the
-    // JS engine's argument-count limit, which real attachments easily exceed).
     const bytes = new Uint8Array(buf);
     let binary = '';
-    const chunkSize = 0x8000; // 32KB per chunk, safely under engine argument limits
+    const chunkSize = 0x8000;
     for(let i=0; i<bytes.length; i+=chunkSize){
       binary += String.fromCharCode.apply(null, bytes.subarray(i, i+chunkSize));
     }
@@ -91,11 +73,7 @@ const Crypto = {
   b64ToBuf(b64){ return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)); },
 };
 
-/* =========================================================================
-   LOCAL ENCRYPTED STORE — IndexedDB. Holds: vault config (salt, verifier,
-   webauthn credential id) and encrypted document/card blobs. Nothing here
-   is ever plaintext except the salt (a salt alone reveals nothing).
-   ========================================================================= */
+/* ===== LOCALDB ===== */
 const LocalDB = {
   _db:null,
   open(){
@@ -148,36 +126,42 @@ const LocalDB = {
   }
 };
 
-/* =========================================================================
-   CLOUD SYNC — Firebase Firestore. Vault content is encrypted client-side
-   BEFORE it is written; Firestore only ever stores ciphertext + non-
-   sensitive metadata (category, timestamps). See README for security rules.
-   ========================================================================= */
+/* ===== CLOUD (Firebase Auth + Firestore) ===== */
 const Cloud = {
-  app:null, db:null, uid:null, configured:false,
+  app:null, db:null, auth:null, configured:false,
   async init(cfg){
     try{
       if(!window.firebase) throw new Error("Firebase SDK not loaded");
       this.app = firebase.apps.length ? firebase.apps[0] : firebase.initializeApp(cfg);
+      this.auth = firebase.auth();
       this.db = firebase.firestore();
-      // No Firebase Auth — this app uses Firestore purely as encrypted storage.
-      // A random per-device ID (kept locally) scopes each vault's documents.
-      this.uid = await LocalDB.getConfig('deviceId');
-      if(!this.uid){
-        this.uid = 'device_' + Crypto.bufToB64(crypto.getRandomValues(new Uint8Array(12))).replace(/[^a-zA-Z0-9]/g,'');
-        await LocalDB.setConfig('deviceId', this.uid);
-      }
+      this.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
       this.configured = true;
       return true;
     }catch(e){ console.warn("Cloud sync unavailable:", e.message); this.configured=false; return false; }
   },
-  col(){ return this.db.collection("vaults").doc(this.uid).collection("items"); },
+  signInWithGoogle(){
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({prompt: 'select_account'});
+    return this.auth.signInWithPopup(provider);
+  },
+  signOut(){
+    return this.auth.signOut();
+  },
+  getCurrentUser(){
+    return this.auth.currentUser;
+  },
+  onAuthStateChanged(callback){
+    return this.auth.onAuthStateChanged(callback);
+  },
+  col(){ 
+    if(!this.auth.currentUser) throw new Error('Not signed in');
+    return this.db.collection("vaults").doc(this.auth.currentUser.uid).collection("items"); 
+  },
   async push(encryptedItem){
-    if(!this.configured) return {ok:false, reason:'not-configured'};
+    if(!this.configured || !this.auth.currentUser) return {ok:false};
     const approxBytes = new Blob([JSON.stringify(encryptedItem)]).size;
     if(approxBytes > 900 * 1024){
-      // Firestore hard-caps every document at 1MiB. Encrypted attachments
-      // that exceed that stay local-only rather than failing the API call.
       console.warn(`Skipping Firestore sync for "${encryptedItem.id}": ${(approxBytes/1024/1024).toFixed(2)}MB exceeds Firestore's 1MB document limit.`);
       return {ok:false, reason:'too-large', sizeMB:(approxBytes/1024/1024).toFixed(1)};
     }
@@ -185,36 +169,26 @@ const Cloud = {
     catch(e){ console.warn("sync push failed", e.message); return {ok:false, reason:'error', message:e.message}; }
   },
   async pull(){
-    if(!this.configured) return [];
+    if(!this.configured || !this.auth.currentUser) return [];
     try{ const snap = await this.col().get(); return snap.docs.map(d=>d.data()); }
     catch(e){ console.warn("sync pull failed", e.message); return []; }
   },
   async remove(id){
-    if(!this.configured) return false;
+    if(!this.configured || !this.auth.currentUser) return false;
     try{ await this.col().doc(id).delete(); return true; } catch(e){ return false; }
   }
 };
 
-/* =========================================================================
-   GOOGLE DRIVE — used purely as encrypted blob storage for attachments.
-   Files are AES-256-GCM encrypted in the browser before upload; Drive only
-   ever stores ciphertext. Firestore/local metadata holds just a small
-   pointer (driveFileId) + name/type/size/iv, so document size stays tiny
-   regardless of the actual file size — this is what lets large attachments
-   sync across devices despite Firestore's 1MB-per-document cap.
-   Uses Google Identity Services (GIS) token client + the 'drive.file'
-   scope, which only grants access to files this app itself creates —
-   Vaullet never sees the rest of your Drive.
-   ========================================================================= */
+/* ===== GOOGLE DRIVE ===== */
 const Drive = {
-  tokenClient:null, accessToken:null, tokenExpiry:0, configured:false,
+  tokenClient:null, accessToken:null, tokenExpiry:0, configured:false, vaultFolderId:null,
   _resolve:null, _reject:null,
 
   async ensureReady(){
     if(this.configured) return true;
     const cfg = window.VAULLET_GOOGLE_CONFIG;
     if(!cfg || !cfg.clientId) return false;
-    for(let i=0;i<25;i++){ // poll up to ~5s for the async GIS script to load
+    for(let i=0;i<25;i++){
       if(window.google && google.accounts && google.accounts.oauth2){
         this.tokenClient = google.accounts.oauth2.initTokenClient({
           client_id: cfg.clientId,
@@ -238,15 +212,51 @@ const Drive = {
   async ensureToken(interactive=true){
     if(this.accessToken && Date.now() < this.tokenExpiry) return this.accessToken;
     const ready = await this.ensureReady();
-    if(!ready) throw new Error('Google Drive is not configured (check google_config.js) or still loading — try again in a moment.');
+    if(!ready) throw new Error('Google Drive is not configured');
     return new Promise((resolve,reject)=>{
       this._resolve = resolve; this._reject = reject;
       this.tokenClient.requestAccessToken({prompt: interactive ? 'consent' : ''});
     });
   },
+  async findOrCreateFolder(parentId, folderName){
+    const token = await this.ensureToken();
+    const q = `name='${folderName.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
+      headers:{Authorization:'Bearer '+token}
+    });
+    if(!res.ok) throw new Error(`Drive query failed (HTTP ${res.status})`);
+    const data = await res.json();
+    if(data.files && data.files.length > 0) return data.files[0].id;
+    
+    // Create folder
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+      method:'POST',
+      headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
+      body:JSON.stringify({name:folderName, mimeType:'application/vnd.google-apps.folder', parents:[parentId]})
+    });
+    if(!createRes.ok) throw new Error(`Drive folder creation failed (HTTP ${createRes.status})`);
+    const newFolder = await createRes.json();
+    return newFolder.id;
+  },
+  async ensureVaultFolder(){
+    if(this.vaultFolderId) return this.vaultFolderId;
+    try{
+      const token = await this.ensureToken();
+      // Find or create "documents" folder in root
+      const documentsId = await this.findOrCreateFolder('root', 'documents');
+      // Find or create "AI Vault" folder inside "documents"
+      const vaultId = await this.findOrCreateFolder(documentsId, 'AI Vault');
+      this.vaultFolderId = vaultId;
+      return vaultId;
+    }catch(e){
+      console.error('Could not ensure vault folder:', e);
+      throw new Error('Failed to set up Drive folder structure: ' + e.message);
+    }
+  },
   async upload(encryptedArrayBuffer, filename){
     const token = await this.ensureToken();
-    const metadata = {name: `vaullet_${filename}.enc`, mimeType: 'application/octet-stream'};
+    const parentFolderId = await this.ensureVaultFolder();
+    const metadata = {name: `vaullet_${filename}.enc`, mimeType: 'application/octet-stream', parents:[parentFolderId]};
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
     form.append('file', new Blob([encryptedArrayBuffer]));
@@ -267,54 +277,14 @@ const Drive = {
     try{
       const token = await this.ensureToken(false);
       await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {method:'DELETE', headers:{Authorization:'Bearer '+token}});
-    }catch(e){ console.warn('Drive delete failed (file may need manual removal):', e.message); }
+    }catch(e){ console.warn('Drive delete failed:', e.message); }
   }
 };
 
-/* =========================================================================
-   WEBAUTHN — device biometric / platform authenticator as an alternative
-   unlock factor. On success we still need the master key, so the PIN-
-   derived key is (locally) re-wrapped: biometric only skips PIN *typing*,
-   it does not bypass encryption — the underlying key material is the same.
-   ========================================================================= */
-const Bio = {
-  supported(){ return !!(window.PublicKeyCredential); },
-  async platformAvailable(){
-    if(!window.PublicKeyCredential) return false;
-    if(!window.isSecureContext) return false; // WebAuthn requires HTTPS or localhost
-    try{ return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }
-    catch(e){ return false; }
-  },
-  async register(){
-    const cred = await navigator.credentials.create({
-      publicKey:{
-        challenge:crypto.getRandomValues(new Uint8Array(32)),
-        rp:{name:"Vaullet"},
-        user:{id:crypto.getRandomValues(new Uint8Array(16)), name:"vault-user", displayName:"Vault User"},
-        pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
-        authenticatorSelection:{authenticatorAttachment:"platform", userVerification:"required"},
-        timeout:60000,
-      }
-    });
-    return cred ? Crypto.bufToB64(cred.rawId) : null;
-  },
-  async assert(credIdB64){
-    await navigator.credentials.get({
-      publicKey:{
-        challenge:crypto.getRandomValues(new Uint8Array(32)),
-        allowCredentials:[{id:Crypto.b64ToBuf(credIdB64), type:"public-key"}],
-        userVerification:"required", timeout:60000,
-      }
-    });
-    return true;
-  }
-};
-
-/* =========================================================================
-   LOCK / UNLOCK FLOW
-   ========================================================================= */
+/* ===== AUTH SCREEN ===== */
 function drawDial(){
   const ticks=document.getElementById('ticks');
+  if(!ticks) return;
   ticks.innerHTML='';
   for(let i=0;i<24;i++){
     const a = (i/24)*2*Math.PI;
@@ -324,6 +294,7 @@ function drawDial(){
 }
 function spinNeedle(){
   const n=document.getElementById('needle');
+  if(!n) return;
   const deg = Math.floor(Math.random()*360);
   n.style.transform = `rotate(${deg}deg)`;
   setTimeout(()=>{ n.style.transform='rotate(0deg)'; }, 550);
@@ -337,6 +308,7 @@ function renderPinDots(container, len, filled){
     container.appendChild(d);
   }
 }
+
 function buildKeypad(el, onDigit, onBack){
   el.innerHTML='';
   const keys=['1','2','3','4','5','6','7','8','9','','0','⌫'];
@@ -349,85 +321,49 @@ function buildKeypad(el, onDigit, onBack){
   });
 }
 
-let pinTarget = 6;          // exact length required to submit (setup: fixed at 6; unlock: loaded from config)
-let setupMinLen = 4;         // during setup, digits below this can't submit early
-const SETUP_MAX_LEN = 6;
+let pinTarget = 6;
+let pinMode = null; // 'setup' | 'unlock'
 
-async function initLock(){
+async function initAuthScreen(){
   drawDial();
-  const salt = await LocalDB.getConfig('salt');
-  const verifier = await LocalDB.getConfig('verifier');
-  State.mode = salt && verifier ? 'unlock' : 'setup';
-
-  if(State.mode==='unlock'){
-    const storedLen = await LocalDB.getConfig('pinLength');
-    pinTarget = storedLen || 6;   // fall back to 6 for vaults created before this fix
-  } else {
-    pinTarget = SETUP_MAX_LEN;    // setup keypad shows up to 6 dots; Confirm button submits 4-6 early
-  }
-
-  document.getElementById('lockTitle').textContent = State.mode==='setup' ? 'Set a vault PIN' : 'Enter your PIN';
-  document.getElementById('lockSub').textContent = State.mode==='setup'
-    ? 'Choose a 4–6 digit PIN, then tap Confirm (or fill all 6). This unlocks your vault key — Vaullet never stores it.'
-    : 'Unlock Vaullet to continue.';
-  State.pinBuffer='';
+  const storedSalt = await LocalDB.getConfig('salt');
+  pinMode = storedSalt ? 'unlock' : 'setup';
+  
+  document.getElementById('lockTitle').textContent = pinMode==='setup' ? 'Set your vault PIN' : 'Enter your PIN';
+  document.getElementById('lockSub').textContent = pinMode==='setup'
+    ? `Welcome, ${State.googleUser.displayName}! Choose a 6-digit PIN to encrypt your vault.`
+    : 'Enter your PIN to unlock your vault.';
+  
   renderPinDots(document.getElementById('pinDots'), pinTarget, 0);
   buildKeypad(document.getElementById('keypad'), onPinDigit, onPinBack);
   document.getElementById('lockError').textContent='';
-  const confirmBtn = document.getElementById('confirmPinBtn');
-  confirmBtn.style.visibility='hidden';
-  confirmBtn.onclick = ()=>{ if(State.mode==='setup') finishSetup(); };
-
-  const credId = await LocalDB.getConfig('webauthnCredId');
-  const bioBtn = document.getElementById('bioBtn');
-  if(State.mode==='unlock' && credId && Bio.supported()){
-    bioBtn.style.display='inline-flex';
-    bioBtn.onclick = async ()=>{
-      try{
-        await Bio.assert(credId);
-        toast('Biometric verified — enter PIN once to finish unlocking this session');
-      }catch(e){ toast('Biometric unlock cancelled'); }
-    };
-  } else bioBtn.style.display='none';
 }
 
 async function onPinDigit(d){
-  if(State.pinBuffer.length>=pinTarget) return;
+  if(State.pinBuffer.length>=6) return;
   State.pinBuffer+=d;
   renderPinDots(document.getElementById('pinDots'), pinTarget, State.pinBuffer.length);
-  updateConfirmVisibility();
-  if(State.mode==='setup' && State.pinBuffer.length===SETUP_MAX_LEN) await finishSetup();
-  if(State.mode==='unlock' && State.pinBuffer.length===pinTarget) await tryUnlock();
+  if(State.pinBuffer.length===6){
+    if(pinMode==='setup') await finishSetup();
+    else await tryUnlock();
+  }
 }
+
 function onPinBack(){
   State.pinBuffer = State.pinBuffer.slice(0,-1);
   renderPinDots(document.getElementById('pinDots'), pinTarget, State.pinBuffer.length);
-  updateConfirmVisibility();
-}
-function updateConfirmVisibility(){
-  const btn = document.getElementById('confirmPinBtn');
-  if(!btn) return;
-  btn.style.visibility = (State.mode==='setup' && State.pinBuffer.length>=setupMinLen && State.pinBuffer.length<SETUP_MAX_LEN) ? 'visible' : 'hidden';
 }
 
 async function finishSetup(){
   const pin = State.pinBuffer;
-  if(pin.length < setupMinLen){ document.getElementById('lockError').textContent = `PIN must be at least ${setupMinLen} digits.`; return; }
   spinNeedle();
   const {key, salt} = await Crypto.deriveKey(pin);
   const verifier = await Crypto.verifierFor(key);
   await LocalDB.setConfig('salt', salt);
   await LocalDB.setConfig('verifier', verifier);
-  await LocalDB.setConfig('pinLength', pin.length);
   State.masterKey = key;
   State.pinBuffer='';
   toast('PIN set. Vault created.');
-  if(Bio.supported()){
-    try{
-      const credId = await Bio.register();
-      if(credId) await LocalDB.setConfig('webauthnCredId', credId);
-    }catch(e){ /* optional, ignore if user declines */ }
-  }
   await enterVault();
 }
 
@@ -447,34 +383,8 @@ async function tryUnlock(){
     document.getElementById('lockError').textContent='Incorrect PIN. Try again.';
     State.pinBuffer='';
     renderPinDots(document.getElementById('pinDots'), pinTarget, 0);
-    const dial=document.querySelector('.dial'); dial.style.animation='none';
-    requestAnimationFrame(()=>{ dial.style.animation='shake .3s'; });
   }
 }
-
-/* ---------------- keyboard input for PIN screens ---------------- */
-document.addEventListener('keydown', (e)=>{
-  const lockVisible = document.getElementById('lock').style.display !== 'none';
-  const authVisible = document.getElementById('authModal').classList.contains('active');
-  if(!lockVisible && !authVisible) return;
-  if(e.key >= '0' && e.key <= '9'){
-    e.preventDefault();
-    if(authVisible){
-      const btn = [...document.querySelectorAll('#authKeypad button')].find(b=>b.textContent===e.key);
-      if(btn) btn.click();
-    } else if(lockVisible){
-      const btn = [...document.querySelectorAll('#keypad button')].find(b=>b.textContent===e.key);
-      if(btn) btn.click();
-    }
-  } else if(e.key === 'Backspace'){
-    e.preventDefault();
-    if(authVisible) onAuthBack(); else if(lockVisible) onPinBack();
-  } else if(e.key === 'Enter'){
-    if(lockVisible && State.mode==='setup' && State.pinBuffer.length>=setupMinLen && State.pinBuffer.length<SETUP_MAX_LEN){
-      e.preventDefault(); finishSetup();
-    }
-  }
-});
 
 async function enterVault(){
   document.getElementById('lock').style.display='none';
@@ -490,32 +400,27 @@ async function enterVault(){
 }
 
 function lockVault(){
-  State.unlocked=false;
   State.masterKey=null;
   State.documents=[];
   State.pinBuffer='';
   document.getElementById('app').classList.remove('active');
   document.getElementById('lock').style.display='flex';
-  initLock();
+  initAuthScreen();
 }
 
-/* =========================================================================
-   DATA LOAD / SAVE — decrypt on load into memory only (session), re-encrypt
-   on every save. Cloud sync merges ciphertext both ways.
-   ========================================================================= */
+/* ===== DATA LOAD/SAVE ===== */
 async function loadVaultData(){
   const cats = await LocalDB.getConfig('categories');
   State.categories = cats && cats.length ? cats : [...DEFAULT_CATEGORIES];
 
   let localItems = await LocalDB.allItems();
 
-  const fileCfg = window.VAULLET_FIREBASE_CONFIG;
-  const fbCfg = (fileCfg && fileCfg.apiKey) ? fileCfg : await LocalDB.getConfig('firebaseConfig');
-  if(fbCfg){
+  const fbCfg = window.VAULLET_FIREBASE_CONFIG;
+  if(fbCfg && fbCfg.apiKey){
     try{
       const ok = await Cloud.init(fbCfg);
-      if(ok){
-        toast('Connected to Firestore — syncing…');
+      if(ok && Cloud.auth.currentUser){
+        toast('Syncing with Firestore…');
         const cloudItems = await Cloud.pull();
         const localIds = new Set(localItems.map(i=>i.id));
         for(const ci of cloudItems){
@@ -526,8 +431,8 @@ async function loadVaultData(){
         localItems = await LocalDB.allItems();
       }
     }catch(e){
-      console.error('Firestore sync failed, continuing with local data only:', e);
-      toast('Firestore sync failed — showing local documents only. See console for details.');
+      console.error('Firestore sync failed:', e);
+      toast('Firestore sync failed — showing local documents only.');
     }
   }
 
@@ -536,16 +441,17 @@ async function loadVaultData(){
     try{
       const json = await Crypto.decryptStr(State.masterKey, {iv:enc.iv, ct:enc.ct});
       const data = JSON.parse(json);
-      State.documents.push({...data, id:enc.id, favorite:!!enc.favorite, updatedAt:enc.updatedAt});
+      State.documents.push({...data, id:enc.id, favorite:!!enc.favorite, updatedAt:enc.updatedAt, deviceName:enc.deviceName});
     }catch(e){ console.warn('Could not decrypt item', enc.id); }
   }
 }
 
 async function saveDocument(doc){
   const id = doc.id || ('doc_'+Date.now()+'_'+Math.random().toString(36).slice(2,8));
-  const payload = {...doc}; delete payload.id; delete payload.favorite; delete payload.updatedAt;
+  const payload = {...doc}; delete payload.id; delete payload.favorite; delete payload.updatedAt; delete payload.deviceName;
   const {iv, ct} = await Crypto.encryptStr(State.masterKey, JSON.stringify(payload));
-  const encItem = {id, iv, ct, category:doc.category, type:doc.type, favorite:doc.favorite||false, updatedAt:Date.now()};
+  const deviceName = await LocalDB.getConfig('deviceName') || 'My Device';
+  const encItem = {id, iv, ct, category:doc.category, type:doc.type, favorite:doc.favorite||false, updatedAt:Date.now(), deviceName};
   await LocalDB.putItem(encItem);
   const pushResult = await Cloud.push(encItem);
   await loadVaultData();
@@ -575,13 +481,212 @@ async function toggleFavorite(id){
     render();
   }catch(e){
     console.error('Could not update favorite:', e);
-    toast('Could not update favorite (see console)');
+    toast('Could not update favorite');
   }
 }
 
-/* =========================================================================
-   NAVIGATION / RAIL
-   ========================================================================= */
+/* ===== FILE MANAGEMENT ===== */
+let fileMenuTargetId = null;
+let fileMoveMode = null; // 'move' or 'copy'
+
+function openFileMenu(id){
+  fileMenuTargetId = id;
+  const modal = document.getElementById('fileMenuModal');
+  modal.classList.add('active');
+}
+
+async function openRenameModal(){
+  const d = State.documents.find(x=>x.id===fileMenuTargetId);
+  if(!d) return;
+  document.getElementById('f_newname').value = d.name;
+  document.getElementById('renameModal').classList.add('active');
+  closeModals();
+}
+
+async function renameFile(){
+  const newName = document.getElementById('f_newname').value.trim();
+  if(!newName) { toast('Name cannot be empty'); return; }
+  
+  try{
+    const d = State.documents.find(x=>x.id===fileMenuTargetId);
+    if(!d) return;
+    
+    d.name = newName;
+    await saveDocument(d);
+    closeModals();
+    toast('File renamed');
+  }catch(e){
+    console.error('Rename failed:', e);
+    toast('Could not rename file');
+  }
+}
+
+async function openMoveModal(mode){
+  fileMoveMode = mode; // 'move' or 'copy'
+  const catSel = document.getElementById('f_targetCategory');
+  catSel.innerHTML = State.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  
+  const d = State.documents.find(x=>x.id===fileMenuTargetId);
+  if(d) catSel.value = d.category;
+  
+  document.getElementById('moveModalTitle').textContent = mode==='move' ? 'Move to category' : 'Copy to category';
+  document.getElementById('confirmMoveBtn').textContent = mode==='move' ? 'Move' : 'Copy';
+  document.getElementById('moveModal').classList.add('active');
+  closeModals();
+}
+
+async function moveOrCopyFile(){
+  const targetCategory = document.getElementById('f_targetCategory').value;
+  const d = State.documents.find(x=>x.id===fileMenuTargetId);
+  if(!d) return;
+  
+  try{
+    if(fileMoveMode==='move'){
+      d.category = targetCategory;
+      await saveDocument(d);
+      toast('File moved to ' + targetCategory);
+    } else if(fileMoveMode==='copy'){
+      const newDoc = {...d};
+      delete newDoc.id;
+      newDoc.category = targetCategory;
+      newDoc.name = newDoc.name + ' (copy)';
+      await saveDocument(newDoc);
+      toast('File copied to ' + targetCategory);
+    }
+    closeModals();
+  }catch(e){
+    console.error('Move/Copy failed:', e);
+    toast('Could not move/copy file');
+  }
+}
+
+async function openDeleteModal(){
+  const d = State.documents.find(x=>x.id===fileMenuTargetId);
+  if(!d) return;
+  
+  document.getElementById('deleteFileName').textContent = escapeHtml(d.name);
+  document.getElementById('deleteModal').classList.add('active');
+  closeModals();
+}
+
+async function deleteFileConfirmed(){
+  try{
+    await deleteDocument(fileMenuTargetId);
+    closeModals();
+    toast('File deleted');
+  }catch(e){
+    console.error('Delete failed:', e);
+    toast('Could not delete file');
+  }
+}
+
+/* ===== FILE PREVIEW ===== */
+async function previewAttachment(id){
+  const d = State.documents.find(x=>x.id===id);
+  if(!d || !d.attachment) return;
+  
+  const modal = document.getElementById('previewModal');
+  const content = document.getElementById('previewContent');
+  const title = document.getElementById('previewTitle');
+  const body = document.getElementById('previewBody');
+  
+  title.textContent = escapeHtml(d.attachment.name || 'Attachment');
+  content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Loading…</div>';
+  modal.classList.add('active');
+  
+  try{
+    let blob;
+    const fileName = d.attachment.name || 'attachment';
+    
+    if(d.attachment.storage === 'drive'){
+      content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Downloading from Google Drive…</div>';
+      const cipherBuf = await Drive.download(d.attachment.driveFileId);
+      const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
+      blob = new Blob([plainBuf], {type: d.attachment.type || 'application/octet-stream'});
+    } else if(d.attachment.data){
+      const res = await fetch(d.attachment.data);
+      blob = await res.blob();
+    } else {
+      throw new Error('No attachment data found');
+    }
+    
+    if(/\.pdf$/i.test(fileName) && window.pdfjsLib){
+      await renderPdfPreview(blob, body);
+    } else if(/\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)){
+      renderImagePreview(blob, body);
+    } else {
+      content.innerHTML = `<div style="text-align:center; padding:40px;">
+        <div style="color:var(--brass); font-size:40px; margin-bottom:12px;">📄</div>
+        <div style="color:var(--bone);">Cannot preview this file type</div>
+        <div style="color:var(--steel); font-size:12px; margin-top:8px;">${escapeHtml(fileName)}</div>
+      </div>`;
+    }
+  }catch(err){
+    console.error('Preview failed:', err);
+    content.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">
+      <div style="margin-bottom:10px;">Could not load preview</div>
+      <div style="font-size:12px; color:var(--steel);">${escapeHtml(err.message)}</div>
+    </div>`;
+  }
+}
+
+async function renderPdfPreview(blob, container){
+  container.innerHTML = '<div id="pdf-viewer" style="height:100%; display:flex; flex-direction:column;"></div>';
+  const viewer = document.getElementById('pdf-viewer');
+  
+  try{
+    const arrayBuf = await blob.arrayBuffer();
+    const pdf = await window.pdfjsLib.getDocument({data: arrayBuf}).promise;
+    
+    viewer.innerHTML = `
+      <div style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-size:12px; color:var(--steel);">Page <span id="pdf-page">1</span> of ${pdf.numPages}</div>
+        <div style="display:flex; gap:6px;">
+          <button class="btn" id="pdf-prev" style="padding:6px 10px; font-size:11px;">← Prev</button>
+          <button class="btn" id="pdf-next" style="padding:6px 10px; font-size:11px;">Next →</button>
+        </div>
+      </div>
+      <div id="pdf-canvas-container" style="flex:1; overflow-y:auto; display:flex; align-items:center; justify-content:center; background:var(--bg-secondary);"></div>
+    `;
+    
+    let currentPage = 1;
+    const renderPage = async (pageNum)=>{
+      try{
+        const page = await pdf.getPage(pageNum);
+        const scale = 1.5;
+        const viewport = page.getViewport({scale});
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({canvasContext:ctx, viewport}).promise;
+        
+        const container = document.getElementById('pdf-canvas-container');
+        container.innerHTML = '';
+        canvas.style.maxWidth = '100%';
+        canvas.style.boxShadow = 'var(--shadow)';
+        container.appendChild(canvas);
+        document.getElementById('pdf-page').textContent = pageNum;
+      }catch(e){
+        console.error('Page render error:', e);
+      }
+    };
+    
+    renderPage(1);
+    document.getElementById('pdf-prev').onclick = ()=>{ if(currentPage>1) renderPage(--currentPage); };
+    document.getElementById('pdf-next').onclick = ()=>{ if(currentPage<pdf.numPages) renderPage(++currentPage); };
+  }catch(e){
+    viewer.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">PDF Library not loaded. Make sure pdf.js is available.</div>`;
+  }
+}
+
+function renderImagePreview(blob, container){
+  const url = URL.createObjectURL(blob);
+  container.innerHTML = `<div style="padding:20px; text-align:center;"><img src="${url}" style="max-width:100%; max-height:100%; border-radius:12px; box-shadow:var(--shadow); display:block; margin:0 auto;"></div>`;
+  setTimeout(()=>URL.revokeObjectURL(url), 300000);
+}
+
+/* ===== NAVIGATION ===== */
 const NAV = [
   {id:'home', label:'Home', icon:'M3 11l9-8 9 8M5 10v10h14V10'},
   {id:'documents', label:'Documents', icon:'M6 2h9l5 5v15H6zM14 2v6h6'},
@@ -590,6 +695,7 @@ const NAV = [
   {id:'notifications', label:'Alerts', icon:'M12 3a5 5 0 0 0-5 5v3l-2 4h14l-2-4V8a5 5 0 0 0-5-5zM10 20a2 2 0 0 0 4 0'},
   {id:'settings', label:'Settings', icon:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z'},
 ];
+
 function renderRail(){
   const rail = document.getElementById('rail');
   rail.innerHTML = `<svg class="rail-logo" viewBox="0 0 40 40"><rect x="4" y="4" width="32" height="32" rx="9" fill="none" stroke="var(--brass)" stroke-width="2"/><circle cx="20" cy="20" r="5" fill="var(--brass)"/></svg>`;
@@ -601,15 +707,14 @@ function renderRail(){
     rail.appendChild(b);
   });
 }
+
 function navigate(tab){
   State.activeTab = tab;
   renderRail();
   render();
 }
 
-/* =========================================================================
-   RENDER — per-tab view builders
-   ========================================================================= */
+/* ===== RENDER HELPERS ===== */
 function fmtDate(d){ if(!d) return '—'; const dt=new Date(d); return dt.toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }
 function daysUntil(d){ if(!d) return Infinity; return Math.ceil((new Date(d) - new Date())/86400000); }
 function maskNumber(num){
@@ -618,22 +723,7 @@ function maskNumber(num){
   if(clean.length<=4) return '••••';
   return 'XXXX '.repeat(Math.max(0,Math.floor((clean.length-4)/4))).trim()+' '+clean.slice(-4);
 }
-
-function render(){
-  const c = document.getElementById('content');
-  const title = document.getElementById('pageTitle');
-  const sub = document.getElementById('pageSub');
-  const views = {
-    home: ()=>{ title.textContent='Home'; sub.textContent='Your vault at a glance'; return renderHome(); },
-    documents: ()=>{ title.textContent='Documents'; sub.textContent=`${State.documents.filter(d=>d.type!=='card').length} stored documents`; return renderDocuments(); },
-    wallet: ()=>{ title.textContent='Wallet'; sub.textContent='Cards & frequently used IDs'; return renderWallet(); },
-    search: ()=>{ title.textContent='Search'; sub.textContent='Find anything in your vault'; return renderSearch(); },
-    notifications: ()=>{ title.textContent='Alerts'; sub.textContent='Expiry reminders'; return renderNotifications(); },
-    settings: ()=>{ title.textContent='Settings'; sub.textContent='Security, sync & preferences'; return renderSettings(); },
-  };
-  c.innerHTML = views[State.activeTab]();
-  wireContentEvents();
-}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
 function docRowHtml(d){
   const expiring = d.expiry && daysUntil(d.expiry) <= 30 && daysUntil(d.expiry) >= 0;
@@ -642,10 +732,11 @@ function docRowHtml(d){
     <div class="doc-icon">${ICONS[d.category]||'📁'}</div>
     <div class="doc-meta">
       <div class="doc-name">${escapeHtml(d.name)}</div>
-      <div class="doc-cat">${escapeHtml(d.category)} ${d.number? '· <span class="mono">'+maskNumber(d.number)+'</span>':''}</div>
+      <div class="doc-cat">${escapeHtml(d.category)} ${d.number? '· <span class="mono">'+maskNumber(d.number)+'</span>':''} ${d.deviceName?'· 📱 '+escapeHtml(d.deviceName):''}</div>
     </div>
     ${expired? '<span class="doc-badge badge-warn">Expired</span>' : expiring? `<span class="doc-badge badge-warn">${daysUntil(d.expiry)}d left</span>`:''}
     <button class="btn-ghost" data-action="fav" data-id="${d.id}" style="font-size:15px;">${d.favorite?'<span class="badge-fav">★</span>':'☆'}</button>
+    <button class="btn-ghost" data-action="file-menu" data-id="${d.id}" style="font-size:18px; padding:6px 10px;" title="More options">⋯</button>
   </div>`;
 }
 
@@ -690,7 +781,7 @@ function renderDocuments(){
     <button class="cat-pill" data-action="new-cat" style="border-style:dashed;">＋ New category</button>
   </div>
   <div style="margin-bottom:16px;"><button class="btn btn-brass" data-action="add-doc">＋ Add document</button></div>
-  ${docs.length? `<div class="doc-grid">${docs.map(d=>`<div>${docRowHtml(d)}</div>`).join('')}</div>` : '<div class="empty">No documents in this category yet.</div>'}
+  ${docs.length? `<div>${docs.map(d=>`<div>${docRowHtml(d)}</div>`).join('')}</div>` : '<div class="empty">No documents in this category yet.</div>'}
   `;
 }
 
@@ -701,6 +792,7 @@ function renderWallet(){
   ${cards.length? `<div class="wallet-grid">${cards.map(cardHtml).join('')}</div>` : '<div class="empty">No cards yet. Add a credit, debit, ID or insurance card.</div>'}
   `;
 }
+
 function cardHtml(d){
   return `<div class="wallet-card" data-id="${d.id}">
     <div class="wc-top">
@@ -727,6 +819,7 @@ function renderSearch(){
   <div id="searchResults"><div class="empty">Type to search across your entire vault.</div></div>
   `;
 }
+
 function runSearch(q){
   const results = document.getElementById('searchResults');
   if(!q.trim()){ results.innerHTML='<div class="empty">Type to search across your entire vault.</div>'; return; }
@@ -757,15 +850,19 @@ function renderNotifications(){
 }
 
 function renderSettings(){
+  const user = Cloud.getCurrentUser();
   return `
+  <div class="settings-card">
+    <div class="settings-row">
+      <div><div class="settings-label">Signed in as</div><div class="settings-sub">${escapeHtml(user?.displayName||'Unknown')}</div></div>
+      <button class="btn btn-ghost" id="signOutBtn" style="color:var(--alert);">Sign out</button>
+    </div>
+  </div>
+
   <div class="settings-card">
     <div class="settings-row">
       <div><div class="settings-label">Dark mode</div><div class="settings-sub">Switch between light and dark themes</div></div>
       <label class="switch"><input type="checkbox" id="themeSwitch" ${State.theme==='dark'?'checked':''}><span class="slider"></span></label>
-    </div>
-    <div class="settings-row">
-      <div><div class="settings-label">Biometric unlock</div><div class="settings-sub" id="bioSub">Use Face ID / fingerprint where supported</div></div>
-      <label class="switch"><input type="checkbox" id="bioSwitch"><span class="slider"></span></label>
     </div>
     <div class="settings-row">
       <div><div class="settings-label">Auto-lock</div><div class="settings-sub">Lock vault after 2 minutes of inactivity</div></div>
@@ -773,55 +870,16 @@ function renderSettings(){
     </div>
   </div>
 
-  <div class="section-title">Cloud sync — Firebase Firestore</div>
+  <div class="section-title">Device management</div>
   <div class="settings-card" style="padding:18px 22px;">
-    ${(window.VAULLET_FIREBASE_CONFIG && window.VAULLET_FIREBASE_CONFIG.apiKey) ? `
-    <div class="help-text" style="margin-bottom:6px;">
-      Loaded from <span class="mono">firebase_config.js</span> — project
-      <strong>${escapeHtml(window.VAULLET_FIREBASE_CONFIG.projectId||'')}</strong>.
-      Status: <span style="color:${Cloud.configured?'var(--safe)':'var(--alert)'}">${Cloud.configured?'Connected':'Not connected — check the console for errors'}</span>
-    </div>
-    <div class="help-text">To change credentials, edit <span class="mono">firebase_config.js</span> directly (keep it out of version control) and reload the app.</div>
-    ` : `
-    <div class="help-text" style="margin-bottom:12px;">
-      Recommended: put your credentials in <span class="mono">firebase_config.js</span>
-      (a separate file next to <span class="mono">index.html</span>, kept out of
-      source control) — it auto-connects on load. Or paste a config below for a
-      quick one-off session. Documents are encrypted in your browser before being
-      written to Firestore — set the security rules in the README so only your
-      signed-in vault can read/write its own ciphertext.
-    </div>
-    <div class="field"><label>Firebase config (JSON) — session only, not saved to a file</label><textarea id="fbConfig" rows="5" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}'></textarea></div>
-    <button class="btn btn-brass" id="saveFbBtn">Connect Firestore</button>
-    <span id="fbStatus" class="help-text" style="margin-left:10px;"></span>
-    `}
-  </div>
-
-  <div class="section-title">File storage — Google Drive</div>
-  <div class="settings-card" style="padding:18px 22px;">
-    ${(window.VAULLET_GOOGLE_CONFIG && window.VAULLET_GOOGLE_CONFIG.clientId) ? `
-    <div class="help-text" style="margin-bottom:6px;">
-      Attachments are encrypted, then uploaded to your Google Drive (via the
-      restricted <span class="mono">drive.file</span> scope — Vaullet can only
-      see files it creates, not your whole Drive). Firestore/local storage
-      then holds only a small pointer + metadata, so document size stays tiny
-      no matter how large the file is.
-      Status: <span id="driveStatus" style="color:${Drive.accessToken?'var(--safe)':'var(--steel)'}">${Drive.accessToken?'Authorized':'Not yet authorized this session'}</span>
-    </div>
-    <button class="btn btn-brass" id="connectDriveBtn">${Drive.accessToken?'Re-authorize Google Drive':'Connect Google Drive'}</button>
-    ` : `
-    <div class="help-text">
-      Add a Client ID to <span class="mono">google_config.js</span> (a separate
-      file next to <span class="mono">index.html</span>) to enable this — see
-      the README for the Google Cloud Console setup steps. Without it,
-      attachments over ~0.9MB stay local-only (see the Firestore note above).
-    </div>
-    `}
+    <div class="field"><label>This device's name</label><input id="deviceNameInput" type="text"></div>
+    <button class="btn btn-brass" id="saveDeviceNameBtn" style="margin-top:8px;">Save device name</button>
+    <div class="help-text" style="margin-top:12px;">Identifies which device uploaded files when syncing across devices</div>
   </div>
 
   <div class="section-title">Backup</div>
   <div class="settings-card" style="padding:18px 22px;">
-    <div class="help-text" style="margin-bottom:12px;">Export an encrypted backup file (password-protected with your current PIN-derived key). Import it on any device after unlocking with the same PIN.</div>
+    <div class="help-text" style="margin-bottom:12px;">Export an encrypted backup file. Import it on any device after signing in with your Google account.</div>
     <div style="display:flex; gap:10px;">
       <button class="btn" id="exportBtn">⬇ Export encrypted backup</button>
       <button class="btn" id="importBtn">⬆ Import backup</button>
@@ -840,11 +898,22 @@ function renderSettings(){
   `;
 }
 
-function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function render(){
+  const c = document.getElementById('content');
+  const title = document.getElementById('pageTitle');
+  const sub = document.getElementById('pageSub');
+  const views = {
+    home: ()=>{ title.textContent='Home'; sub.textContent='Your vault at a glance'; return renderHome(); },
+    documents: ()=>{ title.textContent='Documents'; sub.textContent=`${State.documents.filter(d=>d.type!=='card').length} stored documents`; return renderDocuments(); },
+    wallet: ()=>{ title.textContent='Wallet'; sub.textContent='Cards & frequently used IDs'; return renderWallet(); },
+    search: ()=>{ title.textContent='Search'; sub.textContent='Find anything in your vault'; return renderSearch(); },
+    notifications: ()=>{ title.textContent='Alerts'; sub.textContent='Expiry reminders'; return renderNotifications(); },
+    settings: ()=>{ title.textContent='Settings'; sub.textContent='Security, sync & preferences'; return renderSettings(); },
+  };
+  c.innerHTML = views[State.activeTab]();
+  wireContentEvents();
+}
 
-/* =========================================================================
-   EVENT WIRING
-   ========================================================================= */
 function wireContentEvents(){
   document.querySelectorAll('[data-action="add-doc"]').forEach(b=>b.onclick=()=>openDocModal('document'));
   document.querySelectorAll('[data-action="add-card"]').forEach(b=>b.onclick=()=>openDocModal('card'));
@@ -855,7 +924,8 @@ function wireContentEvents(){
   document.querySelectorAll('[data-action="new-cat"]').forEach(b=>b.onclick=()=>document.getElementById('catModal').classList.add('active'));
   document.querySelectorAll('[data-action="fav"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); toggleFavorite(b.dataset.id); });
   document.querySelectorAll('[data-action="reveal"]').forEach(b=>b.onclick=()=>requestReveal(b.dataset.id));
-  document.querySelectorAll('.doc-row[data-action="open"]').forEach(r=>r.onclick=(e)=>{ if(e.target.closest('[data-action="fav"]')) return; viewDocument(r.dataset.id); });
+  document.querySelectorAll('[data-action="file-menu"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openFileMenu(b.dataset.id); });
+  document.querySelectorAll('.doc-row[data-action="open"]').forEach(r=>r.onclick=(e)=>{ if(e.target.closest('[data-action="fav"]') || e.target.closest('[data-action="file-menu"]')) return; viewDocument(r.dataset.id); });
 
   const search = document.getElementById('searchInput');
   if(search) search.oninput = ()=>runSearch(search.value);
@@ -863,61 +933,17 @@ function wireContentEvents(){
   const themeSwitch = document.getElementById('themeSwitch');
   if(themeSwitch) themeSwitch.onchange = ()=>setTheme(themeSwitch.checked?'dark':'light');
 
-  const bioSwitch = document.getElementById('bioSwitch');
-  if(bioSwitch){
-    LocalDB.getConfig('webauthnCredId').then(id=>bioSwitch.checked=!!id);
-    Bio.platformAvailable().then(avail=>{
-      const sub = document.getElementById('bioSub');
-      if(!avail){
-        bioSwitch.disabled = true;
-        if(sub) sub.textContent = !window.isSecureContext
-          ? 'Requires HTTPS or localhost — open this file via a local server, not file://'
-          : 'No fingerprint/Face ID available on this device or browser';
-      }
-    });
-    bioSwitch.onchange = async ()=>{
-      if(bioSwitch.checked){
-        try{
-          const id=await Bio.register();
-          await LocalDB.setConfig('webauthnCredId', id);
-          toast('Biometric unlock enabled');
-        }catch(e){
-          bioSwitch.checked=false;
-          console.warn('WebAuthn register failed:', e.name, e.message);
-          toast('Could not enable biometrics: ' + (e.message || e.name || 'unknown error'));
-        }
-      } else { await LocalDB.setConfig('webauthnCredId', null); toast('Biometric unlock disabled'); }
+  const deviceNameInput = document.getElementById('deviceNameInput');
+  const saveDeviceNameBtn = document.getElementById('saveDeviceNameBtn');
+  if(deviceNameInput && saveDeviceNameBtn){
+    LocalDB.getConfig('deviceName').then(name=>{ deviceNameInput.value = name || ''; });
+    saveDeviceNameBtn.onclick = async ()=>{
+      const newName = deviceNameInput.value.trim();
+      if(!newName){ toast('Device name cannot be empty'); return; }
+      await LocalDB.setConfig('deviceName', newName);
+      toast('Device name updated');
     };
   }
-
-  const saveFbBtn = document.getElementById('saveFbBtn');
-  if(saveFbBtn) saveFbBtn.onclick = async ()=>{
-    const raw = document.getElementById('fbConfig').value.trim();
-    const status = document.getElementById('fbStatus');
-    try{
-      const cfg = JSON.parse(raw);
-      status.textContent='Connecting…';
-      const ok = await Cloud.init(cfg);
-      if(ok){ await LocalDB.setConfig('firebaseConfig', cfg); status.textContent='✓ Connected'; status.style.color='var(--safe)'; toast('Firestore connected — syncing in background'); await loadVaultData(); render(); }
-      else { status.textContent='Could not connect — check config'; status.style.color='var(--alert)'; }
-    }catch(e){ status.textContent='Invalid JSON'; status.style.color='var(--alert)'; }
-  };
-
-  const connectDriveBtn = document.getElementById('connectDriveBtn');
-  if(connectDriveBtn) connectDriveBtn.onclick = async ()=>{
-    const original = connectDriveBtn.textContent;
-    connectDriveBtn.disabled = true; connectDriveBtn.textContent = 'Opening Google sign-in…';
-    try{
-      await Drive.ensureToken(true);
-      toast('Google Drive connected — new attachments will upload there.');
-    }catch(e){
-      console.error('Drive connect failed:', e);
-      toast('Could not connect Google Drive: ' + e.message);
-    }finally{
-      connectDriveBtn.disabled = false; connectDriveBtn.textContent = original;
-      render();
-    }
-  };
 
   const exportBtn = document.getElementById('exportBtn');
   if(exportBtn) exportBtn.onclick = exportBackup;
@@ -925,6 +951,14 @@ function wireContentEvents(){
   if(importBtn) importBtn.onclick = ()=>document.getElementById('importFile').click();
   const importFile = document.getElementById('importFile');
   if(importFile) importFile.onchange = importBackup;
+
+  const signOutBtn = document.getElementById('signOutBtn');
+  if(signOutBtn) signOutBtn.onclick = async ()=>{
+    if(confirm('Sign out of your Google account? You can sign in again on this device anytime.')){
+      await Cloud.signOut();
+      location.reload();
+    }
+  };
 
   const wipeBtn = document.getElementById('wipeBtn');
   if(wipeBtn) wipeBtn.onclick = async ()=>{
@@ -934,6 +968,52 @@ function wireContentEvents(){
       setTimeout(()=>location.reload(), 900);
     }
   };
+
+  // Preview and download button handlers (use event delegation for dynamic content)
+  document.addEventListener('click', async (e)=>{
+    const previewBtn = e.target.closest('[data-action="preview-attachment"]');
+    if(previewBtn){
+      e.preventDefault();
+      const id = previewBtn.dataset.id;
+      await previewAttachment(id);
+    }
+
+    const downloadBtn = e.target.closest('[data-action="download-attachment"]');
+    if(downloadBtn){
+      e.preventDefault();
+      const id = downloadBtn.dataset.id;
+      const d = State.documents.find(x=>x.id===id);
+      if(d && d.attachment){
+        downloadBtn.disabled = true;
+        downloadBtn.textContent = 'Decrypting…';
+        try{
+          let blob;
+          if(d.attachment.storage === 'drive'){
+            const cipherBuf = await Drive.download(d.attachment.driveFileId);
+            const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
+            blob = new Blob([plainBuf], {type:d.attachment.type || 'application/octet-stream'});
+          } else if(d.attachment.data){
+            const res = await fetch(d.attachment.data);
+            blob = await res.blob();
+          }
+          if(blob){
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = d.attachment.name || 'attachment';
+            a.click();
+            setTimeout(()=>URL.revokeObjectURL(a.href), 100);
+            toast('Downloaded: ' + (d.attachment.name || 'attachment'));
+          }
+        }catch(err){
+          console.error('Download failed:', err);
+          toast('Download failed: ' + err.message);
+        }finally{
+          downloadBtn.disabled = false;
+          downloadBtn.textContent = '⬇ Download';
+        }
+      }
+    }
+  });
 }
 
 function setTheme(t){
@@ -941,7 +1021,7 @@ function setTheme(t){
   document.documentElement.setAttribute('data-theme', t);
 }
 
-/* ---------------- document modal ---------------- */
+/* ===== DOCUMENT MODAL ===== */
 let editingId = null;
 function openDocModal(type){
   editingId = null;
@@ -961,6 +1041,7 @@ function openDocModal(type){
   if(type==='card') catSel.value = 'Cards';
   document.getElementById('docModal').classList.add('active');
 }
+
 function viewDocument(id){
   const d = State.documents.find(x=>x.id===id);
   if(!d) return;
@@ -974,9 +1055,6 @@ function viewDocument(id){
   document.getElementById('f_notes').value=d.notes||'';
   document.getElementById('f_reminder').value=d.reminder||'';
   document.getElementById('f_type').value=d.type||'document';
-  const catSel = document.getElementById('f_category');
-  catSel.innerHTML = State.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  catSel.value = d.category;
   const attSlot = document.getElementById('existingAttachment');
   if(d.attachment){
     attSlot.style.display='block';
@@ -991,6 +1069,9 @@ function viewDocument(id){
   } else {
     attSlot.style.display='none';
   }
+  const catSel = document.getElementById('f_category');
+  catSel.innerHTML = State.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  catSel.value = d.category;
   document.getElementById('docModal').classList.add('active');
 }
 
@@ -999,7 +1080,7 @@ document.getElementById('saveDocBtn').onclick = async ()=>{
   const originalLabel = btn.textContent;
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
-    if(!State.masterKey) throw new Error('Vault key missing — please lock and unlock the vault again.');
+    if(!State.masterKey) throw new Error('Vault key missing — please reload and unlock again.');
     const fileInput = document.getElementById('f_file');
     let attachment = null;
     if(fileInput.files[0]){
@@ -1045,124 +1126,11 @@ document.getElementById('saveDocBtn').onclick = async ()=>{
     }
   }catch(e){
     console.error('Save to vault failed:', e);
-    toast('Could not save: ' + (e.message || 'unknown error') + ' (see console for details)');
+    toast('Could not save: ' + (e.message || 'unknown error'));
   }finally{
     btn.disabled = false; btn.textContent = originalLabel;
   }
 };
-
-/* ................ preview an attachment (view in modal without download) .............. */
-document.getElementById('previewModal').addEventListener('click', async (e)=>{
-  if(e.target.closest('[data-action="preview-attachment"]')){
-    const id = e.target.closest('[data-action="preview-attachment"]').dataset.id;
-    const d = State.documents.find(x=>x.id===id);
-    if(!d || !d.attachment) return;
-    await previewAttachment(d);
-  }
-});
-
-async function previewAttachment(d){
-  const modal = document.getElementById('previewModal');
-  const content = document.getElementById('previewContent');
-  const title = document.getElementById('previewTitle');
-  const body = document.getElementById('previewBody');
-  
-  title.textContent = escapeHtml(d.attachment.name || 'Attachment');
-  content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Loading…</div>';
-  modal.classList.add('active');
-  
-  try{
-    let blob;
-    const fileName = d.attachment.name || 'attachment';
-    
-    if(d.attachment.storage === 'drive'){
-      content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Downloading from Google Drive…</div>';
-      const cipherBuf = await Drive.download(d.attachment.driveFileId);
-      const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
-      blob = new Blob([plainBuf], {type: d.attachment.type || 'application/octet-stream'});
-    } else {
-      const res = await fetch(d.attachment.data);
-      blob = await res.blob();
-    }
-    
-    if(/\.pdf$/i.test(fileName) && window.pdfjsLib){
-      await renderPdfPreview(blob, body);
-    } else if(/\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)){
-      renderImagePreview(blob, body);
-    } else {
-      content.innerHTML = `<div style="text-align:center; padding:40px;"><div style="color:var(--brass); font-size:40px; margin-bottom:12px;">📄</div><div style="color:var(--bone);">Cannot preview this file type</div><div style="color:var(--steel); font-size:12px; margin-top:8px;">${escapeHtml(fileName)}</div></div>`;
-    }
-  }catch(err){
-    console.error('Preview failed:', err);
-    content.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);"><div style="margin-bottom:10px;">Could not load preview</div><div style="font-size:12px; color:var(--steel);">${escapeHtml(err.message)}</div></div>`;
-  }
-}
-
-async function renderPdfPreview(blob, container){
-  container.innerHTML = '<div id="pdf-viewer" style="height:100%; display:flex; flex-direction:column;"></div>';
-  const viewer = document.getElementById('pdf-viewer');
-  const arrayBuf = await blob.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({data: arrayBuf}).promise;
-  viewer.innerHTML = `<div style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center;"><div style="font-size:12px; color:var(--steel);">Page <span id="pdf-page">1</span> of ${pdf.numPages}</div><div style="display:flex; gap:6px;"><button class="btn" id="pdf-prev" style="padding:6px 10px; font-size:11px;">← Prev</button><button class="btn" id="pdf-next" style="padding:6px 10px; font-size:11px;">Next →</button></div></div><div id="pdf-canvas-container" style="flex:1; overflow-y:auto; display:flex; align-items:center; justify-content:center;"></div>`;
-  let currentPage = 1;
-  const renderPage = async (pageNum)=>{
-    const page = await pdf.getPage(pageNum);
-    const scale = 1.5;
-    const viewport = page.getViewport({scale});
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    await page.render({canvasContext:ctx, viewport}).promise;
-    const container = document.getElementById('pdf-canvas-container');
-    container.innerHTML = '';
-    canvas.style.maxWidth = '100%';
-    canvas.style.boxShadow = 'var(--shadow)';
-    container.appendChild(canvas);
-    document.getElementById('pdf-page').textContent = pageNum;
-  };
-  renderPage(1);
-  document.getElementById('pdf-prev').onclick = ()=>{ if(currentPage>1) renderPage(--currentPage); };
-  document.getElementById('pdf-next').onclick = ()=>{ if(currentPage<pdf.numPages) renderPage(++currentPage); };
-}
-
-function renderImagePreview(blob, container){
-  const url = URL.createObjectURL(blob);
-  container.innerHTML = `<div style="padding:20px; text-align:center;"><img src="${url}" style="max-width:100%; max-height:100%; border-radius:12px; box-shadow:var(--shadow);"></div>`;
-  setTimeout(()=>URL.revokeObjectURL(url), 300000);
-}
-
-/* ---------------- download an attachment (decrypt + save-as) ---------------- */
-document.getElementById('existingAttachment').addEventListener('click', async (e)=>{
-  const btn = e.target.closest('[data-action="download-attachment"]');
-  if(!btn) return;
-  const d = State.documents.find(x=>x.id===btn.dataset.id);
-  if(!d || !d.attachment) return;
-  const original = btn.textContent;
-  btn.disabled = true; btn.textContent = 'Decrypting…';
-  try{
-    let blob;
-    if(d.attachment.storage === 'drive'){
-      const cipherBuf = await Drive.download(d.attachment.driveFileId);
-      const plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, cipherBuf);
-      blob = new Blob([plainBuf], {type: d.attachment.type || 'application/octet-stream'});
-    } else {
-      // legacy inline base64 data URL
-      const res = await fetch(d.attachment.data);
-      blob = await res.blob();
-    }
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = d.attachment.name || 'attachment';
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
-  }catch(err){
-    console.error('Attachment download failed:', err);
-    toast('Could not download attachment: ' + err.message);
-  }finally{
-    btn.disabled = false; btn.textContent = original;
-  }
-});
 
 function fileToBase64(file){
   return new Promise((res,rej)=>{
@@ -1173,7 +1141,7 @@ function fileToBase64(file){
   });
 }
 
-/* ---------------- category modal ---------------- */
+/* ===== CATEGORY MODAL ===== */
 document.getElementById('saveCatBtn').onclick = async ()=>{
   const name = document.getElementById('f_catname').value.trim();
   if(!name) return;
@@ -1185,14 +1153,14 @@ document.getElementById('saveCatBtn').onclick = async ()=>{
   toast('Category created');
 };
 
-/* ---------------- re-auth to reveal ---------------- */
+/* ===== REVEAL ===== */
 let authPin='';
 let authPinTarget = 6;
 let authTargetId = null;
 async function requestReveal(id){
   authPin='';
   authTargetId = id;
-  authPinTarget = (await LocalDB.getConfig('pinLength')) || 6;
+  authPinTarget = 6;
   renderPinDots(document.getElementById('authPinDots'), authPinTarget, 0);
   buildKeypad(document.getElementById('authKeypad'), onAuthDigit, onAuthBack);
   document.getElementById('authError').textContent='';
@@ -1227,15 +1195,13 @@ async function tryAuth(id){
   }
 }
 
-/* ---------------- backup / restore ---------------- */
+/* ===== BACKUP ===== */
 async function exportBackup(){
   const items = await LocalDB.allItems();
   const salt = await LocalDB.getConfig('salt');
   const verifier = await LocalDB.getConfig('verifier');
-  const pinLength = await LocalDB.getConfig('pinLength');
-  const deviceId = await LocalDB.getConfig('deviceId');
   const categories = State.categories;
-  const payload = {version:2, salt, verifier, pinLength, deviceId, categories, items, exportedAt:Date.now()};
+  const payload = {version:2, salt, verifier, categories, items, exportedAt:Date.now()};
   const blob = new Blob([JSON.stringify(payload)], {type:'application/octet-stream'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1251,35 +1217,64 @@ async function importBackup(e){
     const payload = JSON.parse(text);
     const existingSalt = await LocalDB.getConfig('salt');
     if(!existingSalt && payload.salt && payload.verifier){
-      // Fresh device with no PIN set yet — restore the same PIN setup so the
-      // original PIN unlocks this backup. (Never overwrites an already-set-up vault.)
       await LocalDB.setConfig('salt', payload.salt);
       await LocalDB.setConfig('verifier', payload.verifier);
-      if(payload.pinLength) await LocalDB.setConfig('pinLength', payload.pinLength);
     }
     for(const it of payload.items) await LocalDB.putItem(it);
     if(payload.categories) await LocalDB.setConfig('categories', payload.categories);
-    if(payload.deviceId){
-      await LocalDB.setConfig('deviceId', payload.deviceId);
-      toast('Backup imported, including this vault\'s Firestore device ID — reconnect Firestore to resume sync.');
-    } else {
-      toast('Backup imported. Unlock with the PIN used at export time to view items.');
-    }
+    toast('Backup imported. Your files should now appear in the vault.');
     await loadVaultData();
     render();
   }catch(err){ toast('Invalid backup file'); }
 }
 
-/* ---------------- modal close ---------------- */
 function closeModals(){ document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('active')); }
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click', e=>{ if(e.target===o) closeModals(); }));
 
-/* ---------------- shell events ---------------- */
+/* ===== FILE MANAGEMENT MODAL HANDLERS ===== */
+const fileMenuModal = document.getElementById('fileMenuModal');
+if(fileMenuModal){
+  fileMenuModal.querySelectorAll('[data-action="file-rename"]').forEach(b=>b.onclick=openRenameModal);
+  fileMenuModal.querySelectorAll('[data-action="file-move"]').forEach(b=>b.onclick=()=>openMoveModal('move'));
+  fileMenuModal.querySelectorAll('[data-action="file-copy"]').forEach(b=>b.onclick=()=>openMoveModal('copy'));
+  fileMenuModal.querySelectorAll('[data-action="file-delete"]').forEach(b=>b.onclick=openDeleteModal);
+}
+
+const confirmRenameBtn = document.getElementById('confirmRenameBtn');
+if(confirmRenameBtn) confirmRenameBtn.onclick = renameFile;
+
+const confirmMoveBtn = document.getElementById('confirmMoveBtn');
+if(confirmMoveBtn) confirmMoveBtn.onclick = moveOrCopyFile;
+
+const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+if(confirmDeleteBtn) confirmDeleteBtn.onclick = deleteFileConfirmed;
+
+/* ===== KEYBOARD ===== */
+document.addEventListener('keydown', (e)=>{
+  const lockVisible = document.getElementById('lock').style.display !== 'none';
+  const authVisible = document.getElementById('authModal').classList.contains('active');
+  if(!lockVisible && !authVisible) return;
+  if(e.key >= '0' && e.key <= '9'){
+    e.preventDefault();
+    if(authVisible){
+      const btn = [...document.querySelectorAll('#authKeypad button')].find(b=>b.textContent===e.key);
+      if(btn) btn.click();
+    } else if(lockVisible){
+      const btn = [...document.querySelectorAll('#keypad button')].find(b=>b.textContent===e.key);
+      if(btn) btn.click();
+    }
+  } else if(e.key === 'Backspace'){
+    e.preventDefault();
+    if(authVisible) onAuthBack(); else if(lockVisible) onPinBack();
+  }
+});
+
+/* ===== SHELL ===== */
 document.getElementById('lockNow').onclick = lockVault;
 document.getElementById('themeToggle').onclick = ()=>setTheme(State.theme==='dark'?'light':'dark');
 
-/* ---------------- auto-lock on inactivity ---------------- */
+/* ===== AUTO-LOCK ===== */
 let inactivityTimer;
 function resetInactivity(){
   clearTimeout(inactivityTimer);
@@ -1289,9 +1284,36 @@ function resetInactivity(){
 }
 ['click','keydown','mousemove','touchstart'].forEach(ev=>document.addEventListener(ev, resetInactivity));
 
-/* ---------------- boot ---------------- */
+/* ===== BOOT ===== */
 (async function boot(){
   await LocalDB.open();
-  await initLock();
-  resetInactivity();
+  const fbCfg = window.VAULLET_FIREBASE_CONFIG;
+  if(fbCfg && fbCfg.apiKey){
+    await Cloud.init(fbCfg);
+  }
+  
+  Cloud.onAuthStateChanged(async (user)=>{
+    if(user){
+      State.googleUser = user;
+      document.getElementById('lock').style.display='flex';
+      document.getElementById('app').classList.remove('active');
+      await initAuthScreen();
+      resetInactivity();
+    } else {
+      // Not signed in
+      document.getElementById('lock').innerHTML = `<div style="text-align:center;">
+        <div class="modal-title display" style="margin-bottom:20px; font-size:24px;">Vaullet</div>
+        <div class="help-text" style="margin-bottom:30px;">Secure personal vault<br>Google Account + Encrypted PIN</div>
+        <button class="btn btn-brass" id="googleSignInBtn" style="font-size:15px; padding:12px 28px;">Sign in with Google</button>
+      </div>`;
+      document.getElementById('googleSignInBtn').onclick = async ()=>{
+        try{
+          await Cloud.signInWithGoogle();
+        }catch(e){
+          console.error('Google sign-in failed:', e);
+          toast('Could not sign in. Make sure Firebase is configured.');
+        }
+      };
+    }
+  });
 })();
