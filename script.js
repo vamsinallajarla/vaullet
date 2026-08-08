@@ -328,13 +328,33 @@ let pinTarget = 6;
 let pinMode = null; // 'setup' | 'unlock'
 
 async function initAuthScreen(){
+  // Create the PIN entry screen HTML
+  document.getElementById('lock').innerHTML = `
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px;">
+      <div style="width:100%; max-width:400px;">
+        <div class="modal-title display" id="lockTitle" style="margin-bottom:10px; text-align:center; font-size:24px;">Set your vault PIN</div>
+        <div class="help-text" id="lockSub" style="margin-bottom:40px; text-align:center;">Welcome! Choose a 6-digit PIN to encrypt your vault.</div>
+        
+        <div id="dialContainer" style="display:flex; justify-content:center; margin-bottom:40px;">
+          <canvas id="pinDial" width="200" height="200"></canvas>
+        </div>
+        
+        <div id="pinDots" style="display:flex; justify-content:center; gap:10px; margin-bottom:30px;"></div>
+        
+        <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:20px;"></div>
+        
+        <div id="lockError" class="help-text" style="color:var(--alert); text-align:center; min-height:20px;"></div>
+      </div>
+    </div>
+  `;
+  
   drawDial();
   const storedSalt = await LocalDB.getConfig('salt');
   pinMode = storedSalt ? 'unlock' : 'setup';
   
   document.getElementById('lockTitle').textContent = pinMode==='setup' ? 'Set your vault PIN' : 'Enter your PIN';
   document.getElementById('lockSub').textContent = pinMode==='setup'
-    ? `Welcome, ${State.googleUser.displayName}! Choose a 6-digit PIN to encrypt your vault.`
+    ? `Welcome, ${State.googleUser.displayName || State.googleUser.email}! Choose a 6-digit PIN to encrypt your vault.`
     : 'Enter your PIN to unlock your vault.';
   
   renderPinDots(document.getElementById('pinDots'), pinTarget, 0);
