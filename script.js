@@ -349,7 +349,25 @@ async function initAuthScreen(){
   `;
   
   drawDial();
-  const storedSalt = await LocalDB.getConfig('salt');
+  let storedSalt = await LocalDB.getConfig('salt');
+  
+  // If no local salt, check Firestore (for multi-device sync)
+  if(!storedSalt){
+    try{
+      const userId = Cloud.auth.currentUser.uid;
+      const vaultDoc = await Cloud.db.collection('vaults').doc(userId).get();
+      if(vaultDoc.exists && vaultDoc.data() && vaultDoc.data().salt){
+        storedSalt = vaultDoc.data().salt;
+        const verifier = vaultDoc.data().verifier;
+        await LocalDB.setConfig('salt', storedSalt);
+        await LocalDB.setConfig('verifier', verifier);
+        console.log('✅ [MULTIDEVICE] Loaded PIN salt from Firestore');
+      }
+    }catch(e){
+      console.warn('⚠️ [MULTIDEVICE] Could not load PIN from Firestore:', e.message);
+    }
+  }
+  
   pinMode = storedSalt ? 'unlock' : 'setup';
   
   document.getElementById('lockTitle').textContent = pinMode==='setup' ? 'Set your vault PIN' : 'Enter your PIN';
@@ -386,6 +404,21 @@ async function finishSetup(){
   await LocalDB.setConfig('verifier', verifier);
   State.masterKey = key;
   State.pinBuffer='';
+  
+  // Store PIN salt in Firestore for multi-device sync
+  try{
+    const userId = Cloud.auth.currentUser.uid;
+    await Cloud.db.collection('vaults').doc(userId).set({
+      salt: salt,
+      verifier: verifier,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, {merge: true});
+    console.log('✅ [MULTIDEVICE] PIN salt synced to Firestore');
+  }catch(e){
+    console.error('❌ [MULTIDEVICE] Failed to sync PIN to Firestore:', e);
+    // Don't fail - local copy is enough
+  }
+  
   toast('PIN set. Vault created.');
   await enterVault();
 }
@@ -1347,6 +1380,16 @@ function resetInactivity(){
     if(user){
       State.googleUser = user;
       console.log('✅ [LOGIN SUCCESS] User authenticated:', user.email);
+      
+      // Cache Google Drive token for file preview (so we don't need auth every time)
+      try{
+        const token = await user.getIdToken();
+        localStorage.setItem('vaullet_drive_token', token);
+        console.log('✅ [DRIVE] Access token cached for file previews');
+      }catch(e){
+        console.warn('⚠️ [DRIVE] Could not cache Drive token:', e.message);
+      }
+      
       document.getElementById('lock').style.display='flex';
       document.getElementById('app').classList.remove('active');
       await initAuthScreen();
