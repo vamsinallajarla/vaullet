@@ -271,9 +271,28 @@ const Drive = {
     return data.id;
   },
   async download(fileId){
-    const token = await this.ensureToken();
+    let token = localStorage.getItem('vaullet_drive_token');
+    
+    // If no cached token, request one
+    if(!token){
+      console.log('⚠️ [DRIVE] No cached token, requesting authorization...');
+      token = await this.ensureToken();
+    } else {
+      console.log('✅ [DRIVE] Using cached token');
+    }
+    
     const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+token}});
-    if(!res.ok) throw new Error(`Drive download failed (HTTP ${res.status})`);
+    if(!res.ok){
+      // If cached token expired, get a new one
+      if(res.status === 401){
+        console.log('🔄 [DRIVE] Token expired, requesting new one...');
+        token = await this.ensureToken();
+        const retryRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {headers:{Authorization:'Bearer '+token}});
+        if(!retryRes.ok) throw new Error(`Drive download failed (HTTP ${retryRes.status})`);
+        return await retryRes.arrayBuffer();
+      }
+      throw new Error(`Drive download failed (HTTP ${res.status})`);
+    }
     return await res.arrayBuffer();
   },
   async remove(fileId){
@@ -985,11 +1004,14 @@ function wireContentEvents(){
     if(e.target.closest('[data-action="fav"]') || e.target.closest('[data-action="file-menu"]')) return;
     const id = r.dataset.id;
     const doc = State.documents.find(d=>d.id===id);
+    console.log('📄 [CLICK] File clicked:', doc?.name, 'Has attachment:', !!doc?.attachment);
     if(doc && doc.attachment){
       // Has attachment - preview it
+      console.log('👁 [PREVIEW] Opening preview for:', doc.attachment.name);
       previewAttachment(id, 0);
     } else {
       // No attachment - open edit modal
+      console.log('✏️ [EDIT] Opening edit modal for:', doc?.name);
       viewDocument(id);
     }
   });
