@@ -144,7 +144,9 @@ const Cloud = {
     if(!this.auth) throw new Error("Firebase Auth not initialized");
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.addScope('https://www.googleapis.com/auth/drive.file');
-    return this.auth.signInWithRedirect(provider);
+    provider.addScope('profile');
+    provider.addScope('email');
+    return this.auth.signInWithPopup(provider);
   },
   signOut(){
     return this.auth.signOut();
@@ -1317,12 +1319,10 @@ function resetInactivity(){
     return;
   }
   
-  console.log('🔍 [BOOT] Firebase Auth initialized, checking redirect...');
+  console.log('🔍 [BOOT] Firebase Auth initialized, setting up auth listener');
   
-  // Set up auth state listener FIRST (critical for redirect handling)
-  let authListenerReady = false;
+  // Set up auth state listener - this will trigger on initial load and whenever auth changes
   Cloud.onAuthStateChanged(async (user)=>{
-    authListenerReady = true;
     console.log('🔍 [AUTH STATE CHANGED]', user ? `User: ${user.email} (${user.uid})` : 'No user (signed out)');
     if(user){
       State.googleUser = user;
@@ -1359,9 +1359,10 @@ function resetInactivity(){
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg> Signing in…`;
-            console.log('🔍 [BUTTON CLICK] Starting sign-in...');
-            await Cloud.signInWithGoogle();
-            console.log('🔍 [REDIRECT] Sign-in redirect initiated - you should be redirected to Google now');
+            console.log('🔍 [BUTTON CLICK] Starting sign-in popup...');
+            const result = await Cloud.signInWithGoogle();
+            console.log('✅ [POPUP SUCCESS] User signed in from popup:', result.user.email);
+            // Auth state listener will handle the UI update
           }catch(e){
             console.error('❌ [ERROR] Google sign-in failed:', e.message);
             console.error('Full error:', e);
@@ -1379,27 +1380,5 @@ function resetInactivity(){
     }
   });
   
-  // Now handle redirect result AFTER listener is set up
-  console.log('🔍 [CHECK] Waiting for auth listener to be ready...');
-  await new Promise(r => setTimeout(r, 1000)); // Wait for listener to attach
-  
-  try{
-    console.log('🔍 [REDIRECT] Checking for redirect result...');
-    const result = await Cloud.auth.getRedirectResult();
-    console.log('🔍 [REDIRECT RESULT]', result);
-    
-    if(result && result.user){
-      console.log('✅ [REDIRECT SUCCESS] User authenticated from redirect:', result.user.email);
-    } else if(result){
-      console.log('⚠️ [REDIRECT] Result exists but no user:', result);
-    } else {
-      console.log('ℹ️ [NORMAL] No redirect result (first load or not from redirect)');
-    }
-  }catch(e){
-    console.error('❌ [REDIRECT ERROR]', e.code, '-', e.message);
-    console.error('Full error:', e);
-    // Don't block on redirect errors - auth state will still trigger
-  }
-  
-  console.log('🔍 [BOOT] Boot sequence complete, waiting for user action...');
+  console.log('🔍 [BOOT] Boot sequence complete, auth listener active');
 })();
