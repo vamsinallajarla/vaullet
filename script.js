@@ -1008,44 +1008,47 @@ async function deleteFileConfirmed(){
 
 /* ===== FILE PREVIEW ===== */
 async function previewAttachment(id){
-  console.log('🖼️ [PREVIEW] Opening preview for:', id);
+  console.log('🖼️ [PREVIEW] Opening preview for file ID:', id);
   const d = State.documents.find(x=>x.id===id);
   if(!d || !d.attachment){
-    console.warn('⚠️ [PREVIEW] No attachment found');
+    console.warn('⚠️ [PREVIEW] No attachment found for:', id);
     return;
   }
   
   const modal = document.getElementById('previewModal');
-  const content = document.getElementById('previewContent');
-  const title = document.getElementById('previewTitle');
-  const body = document.getElementById('previewBody');
+  const previewBody = document.getElementById('previewBody');
+  const previewTitle = document.getElementById('previewTitle');
   
-  // Clear previous content completely
-  body.innerHTML = '';
-  content.innerHTML = '';
-  
-  title.textContent = escapeHtml(d.attachment.name || 'Attachment');
-  content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Loading…</div>';
-  modal.classList.add('active');
-  console.log('✅ [PREVIEW] Modal opened');
+  if(!modal || !previewBody){
+    console.error('❌ [PREVIEW] Modal elements not found');
+    return;
+  }
   
   try{
+    // 1. Complete HTML reset - remove everything
+    console.log('🧹 [PREVIEW] Clearing modal content');
+    previewBody.innerHTML = '';
+    previewTitle.textContent = escapeHtml(d.attachment.name || 'Attachment');
+    
+    // 2. Show loading message
+    previewBody.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Loading…</div>';
+    modal.classList.add('active');
+    
     let blob;
     const fileName = d.attachment.name || 'attachment';
     
+    // 3. Download file
     if(d.attachment.storage === 'drive'){
-      content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Downloading from Google Drive…</div>';
+      previewBody.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Downloading from Google Drive…</div>';
       const fileData = await Drive.download(d.attachment.driveFileId);
       
-      // Check if file is encrypted (has IV) or raw
+      // Check if encrypted or raw
       let plainBuf;
       if(d.attachment.iv){
-        // File is encrypted - decrypt it
         console.log('🔓 [PREVIEW] Decrypting file:', fileName);
         plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, fileData);
       } else {
-        // File is unencrypted - use as-is
-        console.log('📄 [PREVIEW] File is unencrypted, using raw:', fileName);
+        console.log('📄 [PREVIEW] Using raw unencrypted file:', fileName);
         plainBuf = fileData;
       }
       
@@ -1057,24 +1060,27 @@ async function previewAttachment(id){
       throw new Error('No attachment data found');
     }
     
-    // Clear loading message before rendering
-    content.innerHTML = '';
+    // 4. Clear loading and render new content
+    console.log('🎨 [PREVIEW] Rendering file:', fileName);
+    previewBody.innerHTML = '';
     
     if(/\.pdf$/i.test(fileName) && window.pdfjsLib){
-      await renderPdfPreview(blob, body);
+      await renderPdfPreview(blob, previewBody);
+      console.log('✅ [PREVIEW] PDF rendered successfully');
     } else if(/\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)){
-      renderImagePreview(blob, body);
+      renderImagePreview(blob, previewBody);
+      console.log('✅ [PREVIEW] Image rendered successfully');
     } else {
-      content.innerHTML = `<div style="text-align:center; padding:40px;">
+      previewBody.innerHTML = `<div style="text-align:center; padding:40px;">
         <div style="color:var(--brass); font-size:40px; margin-bottom:12px;">📄</div>
         <div style="color:var(--bone);">Cannot preview this file type</div>
         <div style="color:var(--steel); font-size:12px; margin-top:8px;">${escapeHtml(fileName)}</div>
       </div>`;
+      console.log('ℹ️ [PREVIEW] File type not previewable');
     }
-    console.log('✅ [PREVIEW] File rendered successfully');
   }catch(err){
-    console.error('❌ [PREVIEW] Preview failed:', err);
-    content.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">
+    console.error('❌ [PREVIEW] Preview error:', err.message);
+    previewBody.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">
       <div style="margin-bottom:10px;">Could not load preview</div>
       <div style="font-size:12px; color:var(--steel);">${escapeHtml(err.message)}</div>
     </div>`;
@@ -1082,58 +1088,86 @@ async function previewAttachment(id){
 }
 
 async function renderPdfPreview(blob, container){
-  container.innerHTML = '<div id="pdf-viewer" style="height:100%; width:100%; display:flex; flex-direction:column;"></div>';
-  const viewer = document.getElementById('pdf-viewer');
+  console.log('📕 [PDF] Starting PDF render');
+  // Complete cleanup first
+  container.innerHTML = '';
   
-  try{
-    const arrayBuf = await blob.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({data: arrayBuf}).promise;
-    
-    viewer.innerHTML = `
-      <div style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
-        <div style="font-size:12px; color:var(--steel);">Page <span id="pdf-page">1</span> of ${pdf.numPages}</div>
+  const viewerHtml = `
+    <div id="pdf-viewer" style="height:100%; width:100%; display:flex; flex-direction:column; background:var(--bg-secondary);">
+      <div id="pdf-toolbar" style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
+        <div style="font-size:12px; color:var(--steel);">Page <span id="pdf-page">1</span> of <span id="pdf-total">1</span></div>
         <div style="display:flex; gap:6px;">
           <button class="btn" id="pdf-prev" style="padding:6px 10px; font-size:11px;">← Prev</button>
           <button class="btn" id="pdf-next" style="padding:6px 10px; font-size:11px;">Next →</button>
         </div>
       </div>
-      <div id="pdf-canvas-container" style="flex:1; overflow:auto; display:flex; align-items:center; justify-content:center; background:var(--bg-secondary); width:100%;"></div>
-    `;
+      <div id="pdf-canvas-container" style="flex:1; overflow:auto; display:flex; align-items:center; justify-content:center;"></div>
+    </div>
+  `;
+  container.innerHTML = viewerHtml;
+  
+  try{
+    const arrayBuf = await blob.arrayBuffer();
+    const pdf = await window.pdfjsLib.getDocument({data: arrayBuf}).promise;
+    console.log('📕 [PDF] Loaded PDF with', pdf.numPages, 'pages');
+    
+    document.getElementById('pdf-total').textContent = pdf.numPages;
     
     let currentPage = 1;
+    const canvasContainer = document.getElementById('pdf-canvas-container');
+    const prevBtn = document.getElementById('pdf-prev');
+    const nextBtn = document.getElementById('pdf-next');
+    
     const renderPage = async (pageNum)=>{
       try{
+        console.log('📄 [PDF] Rendering page', pageNum);
         const page = await pdf.getPage(pageNum);
         const scale = window.innerHeight > 1000 ? 2 : 1.5;
         const viewport = page.getViewport({scale});
+        
         const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        await page.render({canvasContext:ctx, viewport}).promise;
         
-        const container = document.getElementById('pdf-canvas-container');
-        if(!container) return;
-        container.innerHTML = '';
-        canvas.style.maxWidth = '95vw';
-        canvas.style.maxHeight = '90vh';
-        canvas.style.boxShadow = 'var(--shadow)';
-        container.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+        if(!ctx) throw new Error('Could not get canvas context');
+        
+        await page.render({canvasContext: ctx, viewport}).promise;
+        
+        // Clear and add new canvas
+        if(canvasContainer){
+          canvasContainer.innerHTML = '';
+          canvas.style.maxWidth = '95vw';
+          canvas.style.maxHeight = '85vh';
+          canvas.style.boxShadow = 'var(--shadow)';
+          canvasContainer.appendChild(canvas);
+        }
+        
         const pageSpan = document.getElementById('pdf-page');
         if(pageSpan) pageSpan.textContent = pageNum;
       }catch(e){
-        console.error('❌ [PREVIEW] Page render error:', e);
+        console.error('❌ [PDF] Page render error:', e);
       }
     };
     
-    renderPage(1);
-    const prevBtn = document.getElementById('pdf-prev');
-    const nextBtn = document.getElementById('pdf-next');
-    if(prevBtn) prevBtn.onclick = ()=>{ if(currentPage>1) renderPage(--currentPage); };
-    if(nextBtn) nextBtn.onclick = ()=>{ if(currentPage<pdf.numPages) renderPage(++currentPage); };
+    // Render first page
+    await renderPage(1);
+    
+    // Setup buttons
+    if(prevBtn) prevBtn.onclick = async ()=>{ 
+      if(currentPage > 1) await renderPage(--currentPage); 
+    };
+    if(nextBtn) nextBtn.onclick = async ()=>{ 
+      if(currentPage < pdf.numPages) await renderPage(++currentPage); 
+    };
+    
+    console.log('✅ [PDF] PDF viewer ready');
   }catch(e){
-    console.error('❌ [PREVIEW] PDF render error:', e);
-    viewer.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">PDF Library not loaded. Make sure pdf.js is available.</div>`;
+    console.error('❌ [PDF] PDF render failed:', e);
+    container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">
+      <div style="margin-bottom:10px;">PDF viewer error</div>
+      <div style="font-size:12px; color:var(--steel);">${escapeHtml(e.message)}</div>
+    </div>`;
   }
 }
 
@@ -1718,7 +1752,19 @@ async function importBackup(e){
   }catch(err){ toast('Invalid backup file'); }
 }
 
-function closeModals(){ document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('active')); }
+function closeModals(){ 
+  document.querySelectorAll('.overlay').forEach(o=>{
+    o.classList.remove('active');
+    // Clear any remaining content in modals
+    const modal = o.querySelector('.modal');
+    if(modal){
+      const body = modal.querySelector('.modal-body');
+      if(body && body.id === 'previewBody'){
+        body.innerHTML = '';
+      }
+    }
+  });
+}
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModals);
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click', e=>{ if(e.target===o) closeModals(); }));
 
