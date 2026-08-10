@@ -1008,17 +1008,26 @@ async function deleteFileConfirmed(){
 
 /* ===== FILE PREVIEW ===== */
 async function previewAttachment(id){
+  console.log('🖼️ [PREVIEW] Opening preview for:', id);
   const d = State.documents.find(x=>x.id===id);
-  if(!d || !d.attachment) return;
+  if(!d || !d.attachment){
+    console.warn('⚠️ [PREVIEW] No attachment found');
+    return;
+  }
   
   const modal = document.getElementById('previewModal');
   const content = document.getElementById('previewContent');
   const title = document.getElementById('previewTitle');
   const body = document.getElementById('previewBody');
   
+  // Clear previous content completely
+  body.innerHTML = '';
+  content.innerHTML = '';
+  
   title.textContent = escapeHtml(d.attachment.name || 'Attachment');
   content.innerHTML = '<div style="text-align:center; padding:40px; color:var(--steel);">Loading…</div>';
   modal.classList.add('active');
+  console.log('✅ [PREVIEW] Modal opened');
   
   try{
     let blob;
@@ -1048,6 +1057,9 @@ async function previewAttachment(id){
       throw new Error('No attachment data found');
     }
     
+    // Clear loading message before rendering
+    content.innerHTML = '';
+    
     if(/\.pdf$/i.test(fileName) && window.pdfjsLib){
       await renderPdfPreview(blob, body);
     } else if(/\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)){
@@ -1059,8 +1071,9 @@ async function previewAttachment(id){
         <div style="color:var(--steel); font-size:12px; margin-top:8px;">${escapeHtml(fileName)}</div>
       </div>`;
     }
+    console.log('✅ [PREVIEW] File rendered successfully');
   }catch(err){
-    console.error('Preview failed:', err);
+    console.error('❌ [PREVIEW] Preview failed:', err);
     content.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">
       <div style="margin-bottom:10px;">Could not load preview</div>
       <div style="font-size:12px; color:var(--steel);">${escapeHtml(err.message)}</div>
@@ -1069,7 +1082,7 @@ async function previewAttachment(id){
 }
 
 async function renderPdfPreview(blob, container){
-  container.innerHTML = '<div id="pdf-viewer" style="height:100%; display:flex; flex-direction:column;"></div>';
+  container.innerHTML = '<div id="pdf-viewer" style="height:100%; width:100%; display:flex; flex-direction:column;"></div>';
   const viewer = document.getElementById('pdf-viewer');
   
   try{
@@ -1077,21 +1090,21 @@ async function renderPdfPreview(blob, container){
     const pdf = await window.pdfjsLib.getDocument({data: arrayBuf}).promise;
     
     viewer.innerHTML = `
-      <div style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center;">
+      <div style="padding:12px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center; flex-shrink:0;">
         <div style="font-size:12px; color:var(--steel);">Page <span id="pdf-page">1</span> of ${pdf.numPages}</div>
         <div style="display:flex; gap:6px;">
           <button class="btn" id="pdf-prev" style="padding:6px 10px; font-size:11px;">← Prev</button>
           <button class="btn" id="pdf-next" style="padding:6px 10px; font-size:11px;">Next →</button>
         </div>
       </div>
-      <div id="pdf-canvas-container" style="flex:1; overflow-y:auto; display:flex; align-items:center; justify-content:center; background:var(--bg-secondary);"></div>
+      <div id="pdf-canvas-container" style="flex:1; overflow:auto; display:flex; align-items:center; justify-content:center; background:var(--bg-secondary); width:100%;"></div>
     `;
     
     let currentPage = 1;
     const renderPage = async (pageNum)=>{
       try{
         const page = await pdf.getPage(pageNum);
-        const scale = 1.5;
+        const scale = window.innerHeight > 1000 ? 2 : 1.5;
         const viewport = page.getViewport({scale});
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
@@ -1100,27 +1113,33 @@ async function renderPdfPreview(blob, container){
         await page.render({canvasContext:ctx, viewport}).promise;
         
         const container = document.getElementById('pdf-canvas-container');
+        if(!container) return;
         container.innerHTML = '';
-        canvas.style.maxWidth = '100%';
+        canvas.style.maxWidth = '95vw';
+        canvas.style.maxHeight = '90vh';
         canvas.style.boxShadow = 'var(--shadow)';
         container.appendChild(canvas);
-        document.getElementById('pdf-page').textContent = pageNum;
+        const pageSpan = document.getElementById('pdf-page');
+        if(pageSpan) pageSpan.textContent = pageNum;
       }catch(e){
-        console.error('Page render error:', e);
+        console.error('❌ [PREVIEW] Page render error:', e);
       }
     };
     
     renderPage(1);
-    document.getElementById('pdf-prev').onclick = ()=>{ if(currentPage>1) renderPage(--currentPage); };
-    document.getElementById('pdf-next').onclick = ()=>{ if(currentPage<pdf.numPages) renderPage(++currentPage); };
+    const prevBtn = document.getElementById('pdf-prev');
+    const nextBtn = document.getElementById('pdf-next');
+    if(prevBtn) prevBtn.onclick = ()=>{ if(currentPage>1) renderPage(--currentPage); };
+    if(nextBtn) nextBtn.onclick = ()=>{ if(currentPage<pdf.numPages) renderPage(++currentPage); };
   }catch(e){
+    console.error('❌ [PREVIEW] PDF render error:', e);
     viewer.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">PDF Library not loaded. Make sure pdf.js is available.</div>`;
   }
 }
 
 function renderImagePreview(blob, container){
   const url = URL.createObjectURL(blob);
-  container.innerHTML = `<div style="padding:20px; text-align:center;"><img src="${url}" style="max-width:100%; max-height:100%; border-radius:12px; box-shadow:var(--shadow); display:block; margin:0 auto;"></div>`;
+  container.innerHTML = `<div style="padding:20px; text-align:center; display:flex; align-items:center; justify-content:center; height:100%;"><img src="${url}" style="max-width:95vw; max-height:95vh; object-fit:contain; border-radius:8px; box-shadow:var(--shadow); display:block; margin:0 auto;"></div>`;
   setTimeout(()=>URL.revokeObjectURL(url), 300000);
 }
 
