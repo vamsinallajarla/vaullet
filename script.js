@@ -2108,6 +2108,57 @@ if(confirmMoveBtn) confirmMoveBtn.onclick = moveOrCopyFile;
 const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
 if(confirmDeleteBtn) confirmDeleteBtn.onclick = deleteFileConfirmed;
 
+/* ===== FILE UPLOAD OPTIONS ===== */
+const cameraBtn = document.getElementById('cameraBtn');
+const filesBtn = document.getElementById('filesBtn');
+const fileInput = document.getElementById('f_file');
+const cameraInput = document.getElementById('f_camera');
+const fileSelected = document.getElementById('fileSelected');
+
+if(cameraBtn){
+  cameraBtn.onclick = (e)=>{
+    e.preventDefault();
+    console.log('📷 [UPLOAD] Camera button clicked');
+    cameraInput.click();
+  };
+}
+
+if(filesBtn){
+  filesBtn.onclick = (e)=>{
+    e.preventDefault();
+    console.log('📁 [UPLOAD] Files button clicked');
+    fileInput.click();
+  };
+}
+
+// Handle file selection from both inputs
+function handleFileSelect(file){
+  if(!file) return;
+  console.log('✅ [UPLOAD] File selected:', file.name);
+  fileSelected.textContent = '✓ ' + file.name;
+  fileSelected.style.display = 'block';
+}
+
+if(fileInput){
+  fileInput.onchange = (e)=>{
+    const file = e.target.files?.[0];
+    if(file) handleFileSelect(file);
+  };
+}
+
+if(cameraInput){
+  cameraInput.onchange = (e)=>{
+    const file = e.target.files?.[0];
+    if(file){
+      handleFileSelect(file);
+      // Copy camera file to main file input for processing
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      fileInput.files = dataTransfer.files;
+    }
+  };
+}
+
 /* ===== MOBILE SIDEBAR ===== */
 const hamburgerBtn = document.getElementById('hamburgerBtn');
 const sidebarClose = document.getElementById('sidebarClose');
