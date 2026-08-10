@@ -224,7 +224,7 @@ const Drive = {
     });
   },
   async findOrCreateFolder(parentId, folderName){
-    const token = localStorage.getItem('vaullet_google_access_token');
+    let token = localStorage.getItem('vaullet_google_access_token');
     console.log(`🔍 [DRIVE] Looking for folder "${folderName}" in parent ${parentId}`);
     
     const q = `name='${folderName.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
@@ -232,16 +232,17 @@ const Drive = {
       headers:{Authorization:'Bearer '+token}
     });
     
-    // If 403, try refreshing token
-    if(res.status === 403){
-      console.warn('⚠️ [DRIVE] Got 403, token might be limited, trying to refresh...');
+    // If 401 or 403, try refreshing token
+    if(res.status === 401 || res.status === 403){
+      console.warn('⚠️ [DRIVE] Got HTTP ' + res.status + ', token invalid, refreshing...');
       try{
         const freshToken = await this.ensureToken(true);
         if(freshToken){
           localStorage.setItem('vaullet_google_access_token', freshToken);
+          token = freshToken;
           console.log('✅ [DRIVE] Got fresh token, retrying...');
           res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
-            headers:{Authorization:'Bearer '+freshToken}
+            headers:{Authorization:'Bearer '+token}
           });
         }
       }catch(e){
@@ -267,6 +268,30 @@ const Drive = {
       headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
       body:JSON.stringify({name:folderName, mimeType:'application/vnd.google-apps.folder', parents:[parentId]})
     });
+    
+    // If create also fails with 401/403, retry with fresh token
+    if((createRes.status === 401 || createRes.status === 403) && token !== localStorage.getItem('vaullet_google_access_token')){
+      console.warn('⚠️ [DRIVE] Create failed with HTTP ' + createRes.status + ', retrying with fresh token...');
+      try{
+        const freshToken = await this.ensureToken(true);
+        if(freshToken){
+          localStorage.setItem('vaullet_google_access_token', freshToken);
+          const retryRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+            method:'POST',
+            headers:{Authorization:'Bearer '+freshToken, 'Content-Type':'application/json'},
+            body:JSON.stringify({name:folderName, mimeType:'application/vnd.google-apps.folder', parents:[parentId]})
+          });
+          
+          if(retryRes.ok){
+            const newFolder = await retryRes.json();
+            console.log(`✅ [DRIVE] Created folder "${folderName}": ${newFolder.id}`);
+            return newFolder.id;
+          }
+        }
+      }catch(e){
+        console.warn('⚠️ [DRIVE] Retry failed:', e.message);
+      }
+    }
     
     if(!createRes.ok){
       console.error(`❌ [DRIVE] Folder creation failed (HTTP ${createRes.status})`);
@@ -1941,7 +1966,11 @@ document.getElementById('saveDocBtn').onclick = async ()=>{
     }
   }catch(e){
     console.error('Save to vault failed:', e);
-    toast('Could not save: ' + (e.message || 'unknown error'));
+    let errorMsg = e.message || 'unknown error';
+    if(errorMsg.includes('HTTP 401') || errorMsg.includes('HTTP 403') || errorMsg.includes('token')){
+      errorMsg = 'Google Drive access expired. Please sign out and sign in again.';
+    }
+    toast('Could not save: ' + errorMsg);
   }finally{
     btn.disabled = false; btn.textContent = originalLabel;
   }
