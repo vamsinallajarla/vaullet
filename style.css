@@ -50,16 +50,17 @@ input,select,textarea{font-family:inherit;}
 #lock{
   position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
   background:radial-gradient(circle at 50% 30%, var(--charcoal), var(--ink) 70%);
-  z-index:1000; flex-direction:column; gap:28px; padding:24px; text-align:center;
+  z-index:1000; flex-direction:column; gap:0; padding:20px; text-align:center;
+  overflow-y:auto;
 }
-.dial{width:120px; height:120px; position:relative;}
+.dial{width:120px; height:120px; position:relative; display:none;}
 .dial svg{width:100%; height:100%;}
 .dial-ring{fill:none; stroke:var(--hairline); stroke-width:1.5;}
 .dial-tick{stroke:var(--steel); stroke-width:1.5;}
 .dial-needle{transform-origin:60px 60px; transition:transform .6s cubic-bezier(.2,.9,.3,1.1);}
 .lock-title{font-size:22px; font-weight:600; letter-spacing:.01em;}
-.lock-sub{color:var(--steel); font-size:13.5px; max-width:320px;}
-.pin-dots{display:flex; gap:14px; margin:6px 0;}
+.lock-sub{color:var(--steel); font-size:13.5px; max-width:320px; line-height:1.5;}
+.pin-dots{display:flex; gap:14px; margin:0; justify-content:center;}
 .pin-dot{width:12px; height:12px; border-radius:50%; border:1.5px solid var(--steel); transition:.15s;}
 .pin-dot.filled{background:var(--brass); border-color:var(--brass);}
 .keypad{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; width:100%; max-width:280px;}

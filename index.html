@@ -26,26 +26,44 @@ if(window.pdfjsLib) {
 
 <!-- ============ LOCK SCREEN ============ -->
 <div id="lock">
-  <div class="dial">
-    <svg viewBox="0 0 120 120">
-      <circle class="dial-ring" cx="60" cy="60" r="52"></circle>
-      <g id="ticks"></g>
-      <line id="needle" class="dial-needle" x1="60" y1="60" x2="60" y2="16" stroke="#C9A461" stroke-width="2.5" stroke-linecap="round"></line>
-      <circle cx="60" cy="60" r="4.5" fill="#C9A461"></circle>
-    </svg>
+  <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; width:100%;">
+    
+    <!-- Circular Logo/Icon -->
+    <div style="position:relative; width:200px; height:200px; margin-bottom:40px; flex-shrink:0;">
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%;">
+        <!-- Outer circle -->
+        <circle cx="100" cy="100" r="95" fill="none" stroke="var(--brass)" stroke-width="2" opacity="0.3"/>
+        <circle cx="100" cy="100" r="90" fill="none" stroke="var(--brass)" stroke-width="1.5" opacity="0.2"/>
+        
+        <!-- Inner circle with upload icon background -->
+        <circle cx="100" cy="100" r="70" fill="var(--charcoal)" stroke="var(--brass)" stroke-width="2"/>
+        
+        <!-- Upload icon (folder with arrow) -->
+        <g transform="translate(100, 100)">
+          <!-- Folder shape -->
+          <path d="M -30 -15 L -10 -15 L -5 -25 L 30 -25 L 30 25 L -30 25 Z" fill="none" stroke="var(--brass)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <!-- Upload arrow -->
+          <path d="M -5 10 L -5 -5 M -10 0 L -5 -5 L 0 0" fill="none" stroke="var(--brass)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+      </svg>
+    </div>
+    
+    <!-- Title and Subtitle -->
+    <div style="text-align:center; margin-bottom:50px;">
+      <div class="lock-title display" id="lockTitle" style="font-size:24px; margin-bottom:8px;">Enter your PIN</div>
+      <div class="lock-sub" id="lockSub" style="font-size:13px; color:var(--steel); max-width:280px;">6-digit code to unlock your secure vault</div>
+    </div>
+    
+    <!-- PIN Dots -->
+    <div id="pinDots" style="display:flex; justify-content:center; gap:12px; margin-bottom:40px; flex-shrink:0;"></div>
+    
+    <!-- Error Message -->
+    <div id="lockError" class="lock-error" style="min-height:16px; margin-bottom:30px; text-align:center; color:var(--alert); font-size:12px;"></div>
+    
+    <!-- Keypad -->
+    <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; max-width:280px; width:100%; margin-bottom:20px;"></div>
+    
   </div>
-  <div>
-    <div class="lock-title display" id="lockTitle">Set a vault PIN</div>
-    <div class="lock-sub" id="lockSub">Choose a 4–6 digit PIN. This unlocks your vault key — Vaullet never stores it.</div>
-  </div>
-  <div class="pin-dots" id="pinDots"></div>
-  <div class="lock-error" id="lockError"></div>
-  <div class="keypad" id="keypad"></div>
-  <button class="btn btn-brass" id="confirmPinBtn" style="visibility:hidden">Confirm PIN</button>
-  <button class="bio-btn" id="bioBtn" style="display:none">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a4 4 0 0 0-4 4v6a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></svg>
-    Use biometric unlock
-  </button>
 </div>
 
 <!-- ============ APP SHELL ============ -->

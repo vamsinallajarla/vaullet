@@ -2357,3 +2357,4 @@ function resetInactivity(){
   
   console.log('🔍 [BOOT] Boot sequence complete, auth listener active');
 })();
+
