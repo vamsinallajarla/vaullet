@@ -982,6 +982,58 @@ async function moveOrCopyFile(){
   }
 }
 
+async function downloadFileFromMenu(){
+  console.log('📥 [DOWNLOAD] Downloading from menu for:', fileMenuTargetId);
+  const d = State.documents.find(x=>x.id===fileMenuTargetId);
+  if(!d || !d.attachment){
+    console.warn('⚠️ [DOWNLOAD] No attachment found');
+    toast('No file to download');
+    return;
+  }
+  
+  closeModals();
+  
+  try{
+    let blob;
+    const fileName = d.attachment.name || 'attachment';
+    
+    if(d.attachment.storage === 'drive'){
+      console.log('📥 [DOWNLOAD] Downloading from Drive:', fileName);
+      const fileData = await Drive.download(d.attachment.driveFileId);
+      
+      let plainBuf;
+      if(d.attachment.iv){
+        // File is encrypted - decrypt it
+        console.log('🔓 [DOWNLOAD] Decrypting file:', fileName);
+        plainBuf = await Crypto.decryptBytes(State.masterKey, d.attachment.iv, fileData);
+      } else {
+        // File is unencrypted - use as-is
+        console.log('📄 [DOWNLOAD] File is unencrypted:', fileName);
+        plainBuf = fileData;
+      }
+      blob = new Blob([plainBuf], {type: d.attachment.type || 'application/octet-stream'});
+    } else if(d.attachment.data){
+      const res = await fetch(d.attachment.data);
+      blob = await res.blob();
+    } else {
+      throw new Error('No attachment data found');
+    }
+    
+    if(blob){
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 100);
+      toast('Downloaded: ' + fileName);
+      console.log('✅ [DOWNLOAD] File downloaded:', fileName);
+    }
+  }catch(err){
+    console.error('❌ [DOWNLOAD] Download failed:', err);
+    toast('Download failed: ' + err.message);
+  }
+}
+
 async function openDeleteModal(){
   console.log('🗑️ [MENU] Opening delete modal for:', fileMenuTargetId);
   const d = State.documents.find(x=>x.id===fileMenuTargetId);
@@ -1255,9 +1307,6 @@ function renderHome(){
 
   <div class="section-title">Expiring soon ${expiring.length?`<span class="link" data-action="goto-alerts">View all</span>`:''}</div>
   ${expiring.length? expiring.map(docRowHtml).join('') : '<div class="empty">Nothing expiring in the next 30 days.</div>'}
-
-  <div class="section-title">Recently accessed</div>
-  ${recents.length? recents.map(docRowHtml).join('') : '<div class="empty">No documents yet — upload your first one.</div>'}
 
   <div class="section-title">Favorites</div>
   ${favs.length? favs.map(docRowHtml).join('') : '<div class="empty">Star documents to pin them here.</div>'}
@@ -1790,6 +1839,13 @@ if(fileMenuModal){
       e.preventDefault();
       e.stopPropagation();
       await openMoveModal('copy');
+    };
+  });
+  fileMenuModal.querySelectorAll('[data-action="file-download"]').forEach(b=>{
+    b.onclick = async (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      await downloadFileFromMenu();
     };
   });
   fileMenuModal.querySelectorAll('[data-action="file-delete"]').forEach(b=>{
