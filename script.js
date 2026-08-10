@@ -512,6 +512,29 @@ const Drive = {
       console.error('❌ [DRIVE SYNC] Sync failed:', e.message);
       return 0;
     }
+  },
+  async remove(fileId){
+    try{
+      const token = localStorage.getItem('vaullet_google_access_token');
+      if(!token){
+        console.warn('⚠️ [DRIVE] No access token for delete');
+        return false;
+      }
+      console.log('🗑️ [DRIVE] Deleting file from Drive:', fileId);
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+        method:'DELETE',
+        headers:{Authorization:'Bearer '+token}
+      });
+      if(!res.ok){
+        console.error(`❌ [DRIVE] Delete failed (HTTP ${res.status})`);
+        return false;
+      }
+      console.log('✅ [DRIVE] File deleted from Drive:', fileId);
+      return true;
+    }catch(e){
+      console.error('❌ [DRIVE] Delete error:', e.message);
+      return false;
+    }
   }
 };
 
