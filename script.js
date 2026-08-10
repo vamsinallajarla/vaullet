@@ -228,9 +228,26 @@ const Drive = {
     console.log(`🔍 [DRIVE] Looking for folder "${folderName}" in parent ${parentId}`);
     
     const q = `name='${folderName.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
+    let res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
       headers:{Authorization:'Bearer '+token}
     });
+    
+    // If 403, try refreshing token
+    if(res.status === 403){
+      console.warn('⚠️ [DRIVE] Got 403, token might be limited, trying to refresh...');
+      try{
+        const freshToken = await this.ensureToken(true);
+        if(freshToken){
+          localStorage.setItem('vaullet_google_access_token', freshToken);
+          console.log('✅ [DRIVE] Got fresh token, retrying...');
+          res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
+            headers:{Authorization:'Bearer '+freshToken}
+          });
+        }
+      }catch(e){
+        console.warn('⚠️ [DRIVE] Token refresh failed:', e.message);
+      }
+    }
     
     if(!res.ok){
       console.error(`❌ [DRIVE] Query failed (HTTP ${res.status})`);
@@ -267,12 +284,16 @@ const Drive = {
     }
     try{
       console.log('🔍 [DRIVE] Looking up vault folder...');
-      // Use cached token instead of asking for auth again
-      const token = localStorage.getItem('vaullet_google_access_token');
+      // Use cached token, or request one if missing
+      let token = localStorage.getItem('vaullet_google_access_token');
       if(!token){
         console.warn('⚠️ [DRIVE] No access token, requesting...');
-        // Fallback if no token
-        return null;
+        token = await this.ensureToken(true);
+        if(token){
+          localStorage.setItem('vaullet_google_access_token', token);
+        } else {
+          throw new Error('Could not get access token');
+        }
       }
       
       // Find or create "documents" folder in root
@@ -309,16 +330,52 @@ const Drive = {
   },
   async uploadRaw(fileArrayBuffer, filename){
     // Upload raw (unencrypted) file to Drive
-    const token = localStorage.getItem('vaullet_google_access_token');
+    let token = localStorage.getItem('vaullet_google_access_token');
+    
+    if(!token){
+      console.warn('⚠️ [DRIVE] No access token for upload, requesting...');
+      token = await this.ensureToken(true);
+      if(token){
+        localStorage.setItem('vaullet_google_access_token', token);
+      } else {
+        throw new Error('Could not get access token for upload');
+      }
+    }
+    
     console.log('✅ [DRIVE] Uploading raw file (unencrypted):', filename);
+    
     const parentFolderId = await this.ensureVaultFolder();
     const metadata = {name: filename, mimeType: 'application/octet-stream', parents:[parentFolderId]};
     const form = new FormData();
     form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
     form.append('file', new Blob([fileArrayBuffer]));
-    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+    
+    let res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
       method:'POST', headers:{Authorization:'Bearer '+token}, body:form
     });
+    
+    // If 403, try refreshing token
+    if(res.status === 403 || res.status === 401){
+      console.warn('⚠️ [DRIVE] Got ' + res.status + ' on upload, refreshing token...');
+      try{
+        const freshToken = await this.ensureToken(true);
+        if(freshToken){
+          localStorage.setItem('vaullet_google_access_token', freshToken);
+          console.log('✅ [DRIVE] Got fresh token, retrying upload...');
+          token = freshToken;
+          
+          const form2 = new FormData();
+          form2.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+          form2.append('file', new Blob([fileArrayBuffer]));
+          res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+            method:'POST', headers:{Authorization:'Bearer '+token}, body:form2
+          });
+        }
+      }catch(e){
+        console.warn('⚠️ [DRIVE] Token refresh failed:', e.message);
+      }
+    }
+    
     if(!res.ok) throw new Error(`Drive upload failed (HTTP ${res.status})`);
     const data = await res.json();
     console.log('✅ [DRIVE] Raw file uploaded:', filename, '- ID:', data.id);
@@ -362,7 +419,7 @@ const Drive = {
       if(!token){
         console.warn('⚠️ [DRIVE] No access token found, requesting...');
         token = await this.getAccessToken();
-        if(!token) token = await this.ensureToken();
+        if(!token) token = await this.ensureToken(true);
       } else {
         console.log('✅ [DRIVE] Using stored Google access token');
       }
@@ -371,13 +428,16 @@ const Drive = {
         {headers:{Authorization:'Bearer '+token}}
       );
       
-      // If token expired, try again with fresh token
-      if(res.status === 401){
-        console.log('🔄 [DRIVE] Token expired, getting fresh one...');
-        token = await this.ensureToken();
-        res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, 
-          {headers:{Authorization:'Bearer '+token}}
-        );
+      // If token issue (401 expired or 403 forbidden), refresh and retry
+      if(res.status === 401 || res.status === 403){
+        console.log('🔄 [DRIVE] Token issue (HTTP ' + res.status + '), refreshing...');
+        token = await this.ensureToken(true);
+        if(token){
+          localStorage.setItem('vaullet_google_access_token', token);
+          res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, 
+            {headers:{Authorization:'Bearer '+token}}
+          );
+        }
       }
       
       if(!res.ok) throw new Error(`Drive download failed (HTTP ${res.status})`);
@@ -393,7 +453,7 @@ const Drive = {
       const vaultFolderId = await this.ensureVaultFolder();
       console.log('✅ [DRIVE SYNC] Vault folder ID:', vaultFolderId);
       
-      const token = localStorage.getItem('vaullet_google_access_token');
+      let token = localStorage.getItem('vaullet_google_access_token');
       console.log('🔐 [DRIVE SYNC] Access token available:', !!token);
       
       if(!token){
@@ -404,11 +464,29 @@ const Drive = {
       const q = `'${vaultFolderId}' in parents and trashed=false`;
       console.log('🔍 [DRIVE SYNC] Query:', q);
       
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,createdTime,modifiedTime,size)&pageSize=1000`, {
+      let res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,createdTime,modifiedTime,size)&pageSize=1000`, {
         headers:{Authorization:'Bearer '+token}
       });
       
       console.log('📡 [DRIVE SYNC] Response status:', res.status);
+      
+      // If 403, try refreshing token
+      if(res.status === 403){
+        console.warn('⚠️ [DRIVE SYNC] Got 403, token might be limited, trying to refresh...');
+        try{
+          const freshToken = await this.ensureToken(true);
+          if(freshToken){
+            localStorage.setItem('vaullet_google_access_token', freshToken);
+            console.log('✅ [DRIVE SYNC] Got fresh token, retrying...');
+            token = freshToken;
+            res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,createdTime,modifiedTime,size)&pageSize=1000`, {
+              headers:{Authorization:'Bearer '+token}
+            });
+          }
+        }catch(e){
+          console.warn('⚠️ [DRIVE SYNC] Token refresh failed:', e.message);
+        }
+      }
       
       if(!res.ok){
         const errText = await res.text();
