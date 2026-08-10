@@ -1460,6 +1460,38 @@ function renderRail(){
   });
 }
 
+function renderMobileSidebar(){
+  const sidebarNav = document.getElementById('mobileSidebarNav');
+  sidebarNav.innerHTML = '';
+  
+  NAV.forEach(n=>{
+    const b=document.createElement('button');
+    b.className='rail-btn'+(State.activeTab===n.id?' active':'');
+    b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="${n.icon}"/></svg><span>${n.label}</span>`;
+    b.onclick=()=>{
+      navigate(n.id);
+      closeMobileSidebar();
+    };
+    sidebarNav.appendChild(b);
+  });
+}
+
+function openMobileSidebar(){
+  const sidebar = document.getElementById('mobileSidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  sidebar.classList.add('active');
+  overlay.classList.add('active');
+  console.log('📂 [SIDEBAR] Mobile sidebar opened');
+}
+
+function closeMobileSidebar(){
+  const sidebar = document.getElementById('mobileSidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  sidebar.classList.remove('active');
+  overlay.classList.remove('active');
+  console.log('📂 [SIDEBAR] Mobile sidebar closed');
+}
+
 function navigate(tab){
   State.activeTab = tab;
   renderRail();
@@ -1661,6 +1693,7 @@ function render(){
     settings: ()=>{ title.textContent='Settings'; sub.textContent='Security, sync & preferences'; return renderSettings(); },
   };
   c.innerHTML = views[State.activeTab]();
+  renderMobileSidebar();
   wireContentEvents();
 }
 
@@ -2074,6 +2107,29 @@ if(confirmMoveBtn) confirmMoveBtn.onclick = moveOrCopyFile;
 
 const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
 if(confirmDeleteBtn) confirmDeleteBtn.onclick = deleteFileConfirmed;
+
+/* ===== MOBILE SIDEBAR ===== */
+const hamburgerBtn = document.getElementById('hamburgerBtn');
+const sidebarClose = document.getElementById('sidebarClose');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+
+if(hamburgerBtn){
+  hamburgerBtn.onclick = (e)=>{
+    e.preventDefault();
+    openMobileSidebar();
+  };
+}
+
+if(sidebarClose){
+  sidebarClose.onclick = (e)=>{
+    e.preventDefault();
+    closeMobileSidebar();
+  };
+}
+
+if(sidebarOverlay){
+  sidebarOverlay.onclick = closeMobileSidebar;
+}
 
 /* ===== KEYBOARD ===== */
 document.addEventListener('keydown', (e)=>{
