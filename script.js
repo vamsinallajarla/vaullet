@@ -695,16 +695,31 @@ async function initAuthScreen(){
   if(!storedSalt){
     try{
       const userId = Cloud.auth.currentUser.uid;
+      console.log('🔍 [MULTIDEVICE] Checking Firestore for PIN salt, user:', userId);
+      
       const vaultDoc = await Cloud.db.collection('vaults').doc(userId).get();
-      if(vaultDoc.exists && vaultDoc.data() && vaultDoc.data().salt){
-        storedSalt = vaultDoc.data().salt;
-        const verifier = vaultDoc.data().verifier;
-        await LocalDB.setConfig('salt', storedSalt);
-        await LocalDB.setConfig('verifier', verifier);
-        console.log('✅ [MULTIDEVICE] Loaded PIN salt from Firestore');
+      console.log('📋 [MULTIDEVICE] Firestore document exists:', vaultDoc.exists);
+      
+      if(vaultDoc.exists){
+        const data = vaultDoc.data();
+        console.log('📋 [MULTIDEVICE] Document data keys:', Object.keys(data || {}));
+        
+        if(data && data.salt){
+          storedSalt = data.salt;
+          const verifier = data.verifier;
+          await LocalDB.setConfig('salt', storedSalt);
+          await LocalDB.setConfig('verifier', verifier);
+          console.log('✅ [MULTIDEVICE] PIN salt loaded from Firestore successfully');
+        } else {
+          console.warn('⚠️ [MULTIDEVICE] Document exists but no salt found');
+        }
+      } else {
+        console.log('ℹ️ [MULTIDEVICE] No Firestore document found - this is first device');
       }
     }catch(e){
       console.warn('⚠️ [MULTIDEVICE] Could not load PIN from Firestore:', e.message);
+      console.warn('⚠️ [MULTIDEVICE] Error code:', e.code);
+      // Don't fail - just use setup mode
     }
   }
   
@@ -748,15 +763,24 @@ async function finishSetup(){
   // Store PIN salt in Firestore for multi-device sync
   try{
     const userId = Cloud.auth.currentUser.uid;
-    await Cloud.db.collection('vaults').doc(userId).set({
+    console.log('💾 [MULTIDEVICE] Saving PIN salt to Firestore for user:', userId);
+    
+    const vaultData = {
       salt: salt,
       verifier: verifier,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, {merge: true});
-    console.log('✅ [MULTIDEVICE] PIN salt synced to Firestore');
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+      email: Cloud.auth.currentUser.email
+    };
+    
+    await Cloud.db.collection('vaults').doc(userId).set(vaultData, {merge: true});
+    console.log('✅ [MULTIDEVICE] PIN salt successfully saved to Firestore');
   }catch(e){
     console.error('❌ [MULTIDEVICE] Failed to sync PIN to Firestore:', e);
+    console.error('❌ [MULTIDEVICE] Error code:', e.code);
+    console.error('❌ [MULTIDEVICE] Error message:', e.message);
     // Don't fail - local copy is enough
+    toast('⚠️ Cloud sync failed, but vault is created locally');
   }
   
   toast('PIN set. Vault created.');
@@ -806,28 +830,39 @@ function lockVault(){
 
 /* ===== DATA LOAD/SAVE ===== */
 async function loadVaultData(){
+  console.log('📂 [VAULT] Loading vault data...');
   const cats = await LocalDB.getConfig('categories');
   State.categories = cats && cats.length ? cats : [...DEFAULT_CATEGORIES];
 
   let localItems = await LocalDB.allItems();
+  console.log('💾 [VAULT] Found', localItems.length, 'local items');
 
   const fbCfg = window.VAULLET_FIREBASE_CONFIG;
   if(fbCfg && fbCfg.apiKey){
     try{
       const ok = await Cloud.init(fbCfg);
       if(ok && Cloud.auth.currentUser){
+        console.log('☁️ [VAULT] Syncing with Firestore...');
         toast('Syncing with Firestore…');
         const cloudItems = await Cloud.pull();
+        console.log('☁️ [VAULT] Found', cloudItems.length, 'cloud items');
         const localIds = new Set(localItems.map(i=>i.id));
+        let newCount = 0;
         for(const ci of cloudItems){
           if(!localIds.has(ci.id)){
-            try{ await LocalDB.putItem(ci); } catch(e){ console.warn('Skipping malformed cloud item', ci.id, e); }
+            try{ 
+              await LocalDB.putItem(ci); 
+              newCount++;
+            } catch(e){ 
+              console.warn('⚠️ [VAULT] Skipping malformed cloud item', ci.id, e); 
+            }
           }
         }
+        if(newCount > 0) console.log('✅ [VAULT] Added', newCount, 'new items from cloud');
         localItems = await LocalDB.allItems();
       }
     }catch(e){
-      console.error('Firestore sync failed:', e);
+      console.error('❌ [VAULT] Firestore sync failed:', e);
       toast('Firestore sync failed — showing local documents only.');
     }
   }
@@ -838,16 +873,24 @@ async function loadVaultData(){
       const json = await Crypto.decryptStr(State.masterKey, {iv:enc.iv, ct:enc.ct});
       const data = JSON.parse(json);
       State.documents.push({...data, id:enc.id, favorite:!!enc.favorite, updatedAt:enc.updatedAt, deviceName:enc.deviceName});
-    }catch(e){ console.warn('Could not decrypt item', enc.id); }
+    }catch(e){ 
+      console.warn('⚠️ [VAULT] Could not decrypt item', enc.id); 
+    }
   }
+  
+  console.log('✅ [VAULT] Loaded', State.documents.length, 'decrypted documents');
   
   // Auto-sync files from Google Drive vault folder
   if(State.googleUser && localStorage.getItem('vaullet_google_access_token')){
     try{
+      console.log('📁 [VAULT] Auto-syncing from Google Drive...');
       const synced = await Drive.syncFromDrive();
-      if(synced > 0) toast(`✅ Synced ${synced} file${synced!==1?'s':''} from Drive`);
+      if(synced > 0) {
+        console.log('✅ [VAULT] Synced', synced, 'files from Drive');
+        toast(`✅ Synced ${synced} file${synced!==1?'s':''} from Drive`);
+      }
     }catch(e){
-      console.warn('Auto-sync failed:', e.message);
+      console.warn('⚠️ [VAULT] Auto-sync failed:', e.message);
     }
   }
 }
