@@ -1122,13 +1122,37 @@ async function previewAttachment(id){
     } else if(/\.(jpg|jpeg|png|gif|webp)$/i.test(fileName)){
       renderImagePreview(blob, previewBody);
       console.log('✅ [PREVIEW] Image rendered successfully');
+    } else if(/\.(txt|md|markdown|js|json|html|css|xml|yaml|yml|py|java|cpp|c|sh|bash)$/i.test(fileName)){
+      // Text-based files
+      await renderTextPreview(blob, previewBody, fileName);
+      console.log('✅ [PREVIEW] Text file rendered successfully');
+    } else if(/\.(doc|docx)$/i.test(fileName)){
+      // Word documents - show download button with preview message
+      renderDocumentPreview(blob, previewBody, fileName, d.attachment.name);
+      console.log('ℹ️ [PREVIEW] Word document - showing download option');
+    } else if(/\.(xls|xlsx)$/i.test(fileName)){
+      // Excel files - show download button with preview message
+      renderSpreadsheetPreview(blob, previewBody, fileName, d.attachment.name);
+      console.log('ℹ️ [PREVIEW] Excel file - showing download option');
     } else {
       previewBody.innerHTML = `<div style="text-align:center; padding:40px;">
         <div style="color:var(--brass); font-size:40px; margin-bottom:12px;">📄</div>
         <div style="color:var(--bone);">Cannot preview this file type</div>
         <div style="color:var(--steel); font-size:12px; margin-top:8px;">${escapeHtml(fileName)}</div>
+        <button class="btn" id="fallback-download" style="margin-top:16px;">⬇️ Download file</button>
       </div>`;
-      console.log('ℹ️ [PREVIEW] File type not previewable');
+      // Add download handler
+      const dlBtn = document.getElementById('fallback-download');
+      if(dlBtn){
+        dlBtn.onclick = ()=>{
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = d.attachment.name || 'file';
+          a.click();
+          setTimeout(()=>URL.revokeObjectURL(a.href), 100);
+        };
+      }
+      console.log('ℹ️ [PREVIEW] File type not previewed - download option provided');
     }
   }catch(err){
     console.error('❌ [PREVIEW] Preview error:', err.message);
@@ -1227,6 +1251,95 @@ function renderImagePreview(blob, container){
   const url = URL.createObjectURL(blob);
   container.innerHTML = `<div style="padding:20px; text-align:center; display:flex; align-items:center; justify-content:center; height:100%;"><img src="${url}" style="max-width:95vw; max-height:95vh; object-fit:contain; border-radius:8px; box-shadow:var(--shadow); display:block; margin:0 auto;"></div>`;
   setTimeout(()=>URL.revokeObjectURL(url), 300000);
+}
+
+async function renderTextPreview(blob, container, fileName){
+  try{
+    const text = await blob.text();
+    const language = getLanguageFromExt(fileName);
+    
+    container.innerHTML = `
+      <div style="padding:20px; height:100%; display:flex; flex-direction:column;">
+        <div style="flex:1; overflow:auto; background:var(--bg-secondary); border-radius:8px; padding:16px;">
+          <pre style="margin:0; color:var(--bone); font-family:monospace; font-size:13px; line-height:1.5; white-space:pre-wrap; word-wrap:break-word;">${escapeHtml(text)}</pre>
+        </div>
+      </div>
+    `;
+    console.log('✅ [TEXT] Text file rendered:', fileName);
+  }catch(err){
+    console.error('❌ [TEXT] Failed to read text file:', err);
+    container.innerHTML = `<div style="text-align:center; padding:40px; color:var(--alert);">
+      <div>Could not read file</div>
+      <div style="font-size:12px; color:var(--steel);">${escapeHtml(err.message)}</div>
+    </div>`;
+  }
+}
+
+function getLanguageFromExt(fileName){
+  const ext = fileName.split('.').pop().toLowerCase();
+  const langs = {
+    'js': 'javascript',
+    'py': 'python',
+    'java': 'java',
+    'cpp': 'cpp',
+    'c': 'c',
+    'html': 'html',
+    'css': 'css',
+    'json': 'json',
+    'xml': 'xml',
+    'sh': 'bash',
+    'bash': 'bash',
+    'md': 'markdown',
+    'yaml': 'yaml',
+    'yml': 'yaml'
+  };
+  return langs[ext] || 'text';
+}
+
+function renderDocumentPreview(blob, container, fileName, originalName){
+  container.innerHTML = `
+    <div style="text-align:center; padding:40px; display:flex; flex-direction:column; align-items:center; height:100%; justify-content:center;">
+      <div style="color:var(--brass); font-size:50px; margin-bottom:16px;">📄</div>
+      <div style="color:var(--bone); font-size:16px; margin-bottom:8px;">Word Document</div>
+      <div style="color:var(--steel); font-size:12px; margin-bottom:24px;">${escapeHtml(originalName || fileName)}</div>
+      <button class="btn" id="doc-download" style="padding:10px 24px;">⬇️ Download and Open in Word</button>
+      <div style="color:var(--steel); font-size:11px; margin-top:16px; max-width:400px;">Word documents are best viewed in Microsoft Word or compatible applications. Click the download button to open this file.</div>
+    </div>
+  `;
+  
+  const dlBtn = document.getElementById('doc-download');
+  if(dlBtn){
+    dlBtn.onclick = ()=>{
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = originalName || fileName;
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 100);
+    };
+  }
+}
+
+function renderSpreadsheetPreview(blob, container, fileName, originalName){
+  container.innerHTML = `
+    <div style="text-align:center; padding:40px; display:flex; flex-direction:column; align-items:center; height:100%; justify-content:center;">
+      <div style="color:var(--brass); font-size:50px; margin-bottom:16px;">📊</div>
+      <div style="color:var(--bone); font-size:16px; margin-bottom:8px;">Excel Spreadsheet</div>
+      <div style="color:var(--steel); font-size:12px; margin-bottom:24px;">${escapeHtml(originalName || fileName)}</div>
+      <button class="btn" id="xlsx-download" style="padding:10px 24px;">⬇️ Download and Open in Excel</button>
+      <div style="color:var(--steel); font-size:11px; margin-top:16px; max-width:400px;">Excel spreadsheets are best viewed in Microsoft Excel or compatible applications. Click the download button to open this file.</div>
+    </div>
+  `;
+  
+  const dlBtn = document.getElementById('xlsx-download');
+  if(dlBtn){
+    dlBtn.onclick = ()=>{
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = originalName || fileName;
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 100);
+    };
+  }
 }
 
 /* ===== NAVIGATION ===== */
