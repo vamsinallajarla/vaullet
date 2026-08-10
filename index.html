@@ -111,7 +111,13 @@ if(window.pdfjsLib) {
       <div class="field"><label>Tags (comma separated)</label><input id="f_tags" placeholder="e.g. urgent, family, 2026"></div>
       <div class="field"><label>Notes</label><textarea id="f_notes" rows="3" placeholder="Optional description or notes"></textarea></div>
       <div class="field"><label>Attach file (PDF / JPG / PNG) or scan</label>
-        <input id="f_file" type="file" accept=".pdf,.jpg,.jpeg,.png" capture="environment">
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <button type="button" class="btn" id="cameraBtn" style="flex:1;">📷 Take photo</button>
+          <button type="button" class="btn" id="filesBtn" style="flex:1;">📁 Choose file</button>
+        </div>
+        <input id="f_file" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;">
+        <input id="f_camera" type="file" accept="image/*" capture="environment" style="display:none;">
+        <div id="fileSelected" style="padding:8px 12px; background:var(--graphite); border-radius:8px; color:var(--bone-dim); font-size:12px; display:none; margin-bottom:12px;"></div>
         <div class="help-text">Files are encrypted (AES-256-GCM) in your browser before they touch storage or sync. Max 100MB — files over ~0.9MB (encrypted) stay local-only, since Firestore caps documents at 1MB, unless Google Drive is connected.</div>
         <div id="existingAttachment" style="display:none; margin-top:10px;"></div>
       </div>
