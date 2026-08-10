@@ -143,7 +143,8 @@ const Cloud = {
   signInWithGoogle(){
     if(!this.auth) throw new Error("Firebase Auth not initialized");
     const provider = new firebase.auth.GoogleAuthProvider();
-    provider.addScope('https://www.googleapis.com/auth/drive.file');
+    // Request full Drive access (not just files created by this app)
+    provider.addScope('https://www.googleapis.com/auth/drive');
     provider.addScope('profile');
     provider.addScope('email');
     return this.auth.signInWithPopup(provider);
@@ -223,36 +224,70 @@ const Drive = {
   },
   async findOrCreateFolder(parentId, folderName){
     const token = localStorage.getItem('vaullet_google_access_token');
+    console.log(`🔍 [DRIVE] Looking for folder "${folderName}" in parent ${parentId}`);
+    
     const q = `name='${folderName.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`;
     const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)&pageSize=1`, {
       headers:{Authorization:'Bearer '+token}
     });
-    if(!res.ok) throw new Error(`Drive query failed (HTTP ${res.status})`);
-    const data = await res.json();
-    if(data.files && data.files.length > 0) return data.files[0].id;
     
+    if(!res.ok){
+      console.error(`❌ [DRIVE] Query failed (HTTP ${res.status})`);
+      throw new Error(`Drive query failed (HTTP ${res.status})`);
+    }
+    
+    const data = await res.json();
+    if(data.files && data.files.length > 0){
+      console.log(`✅ [DRIVE] Found existing folder "${folderName}": ${data.files[0].id}`);
+      return data.files[0].id;
+    }
+    
+    console.log(`📝 [DRIVE] Creating new folder "${folderName}"...`);
     // Create folder
     const createRes = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
       method:'POST',
       headers:{Authorization:'Bearer '+token, 'Content-Type':'application/json'},
       body:JSON.stringify({name:folderName, mimeType:'application/vnd.google-apps.folder', parents:[parentId]})
     });
-    if(!createRes.ok) throw new Error(`Drive folder creation failed (HTTP ${createRes.status})`);
+    
+    if(!createRes.ok){
+      console.error(`❌ [DRIVE] Folder creation failed (HTTP ${createRes.status})`);
+      throw new Error(`Drive folder creation failed (HTTP ${createRes.status})`);
+    }
+    
     const newFolder = await createRes.json();
+    console.log(`✅ [DRIVE] Created folder "${folderName}": ${newFolder.id}`);
     return newFolder.id;
   },
   async ensureVaultFolder(){
-    if(this.vaultFolderId) return this.vaultFolderId;
+    if(this.vaultFolderId){
+      console.log('✅ [DRIVE] Using cached vault folder ID:', this.vaultFolderId);
+      return this.vaultFolderId;
+    }
     try{
-      const token = await this.ensureToken();
+      console.log('🔍 [DRIVE] Looking up vault folder...');
+      // Use cached token instead of asking for auth again
+      const token = localStorage.getItem('vaullet_google_access_token');
+      if(!token){
+        console.warn('⚠️ [DRIVE] No access token, requesting...');
+        // Fallback if no token
+        return null;
+      }
+      
       // Find or create "documents" folder in root
+      console.log('🔍 [DRIVE] Creating/finding Documents folder...');
       const documentsId = await this.findOrCreateFolder('root', 'documents');
+      console.log('✅ [DRIVE] Documents folder ID:', documentsId);
+      
       // Find or create "AI Vault" folder inside "documents"
+      console.log('🔍 [DRIVE] Creating/finding AI Vault folder...');
       const vaultId = await this.findOrCreateFolder(documentsId, 'AI Vault');
+      console.log('✅ [DRIVE] AI Vault folder ID:', vaultId);
+      
       this.vaultFolderId = vaultId;
       return vaultId;
     }catch(e){
-      console.error('Could not ensure vault folder:', e);
+      console.error('❌ [DRIVE] Could not ensure vault folder:', e);
       throw new Error('Failed to set up Drive folder structure: ' + e.message);
     }
   },
@@ -288,6 +323,36 @@ const Drive = {
     console.log('✅ [DRIVE] Raw file uploaded:', filename, '- ID:', data.id);
     return data.id;
   },
+  async getAccessToken(){
+    // Try to use cached token first
+    let token = localStorage.getItem('vaullet_google_access_token');
+    if(token){
+      console.log('✅ [DRIVE] Using cached access token');
+      return token;
+    }
+    
+    // No cached token - request fresh one
+    try{
+      console.log('🔄 [DRIVE] Requesting fresh access token...');
+      const user = this.auth.currentUser;
+      if(!user){
+        console.warn('⚠️ [DRIVE] No user logged in');
+        return null;
+      }
+      
+      // Force refresh - this will ask user for permission if needed
+      const result = await this.signInWithGoogle();
+      if(result.credential && result.credential.accessToken){
+        token = result.credential.accessToken;
+        localStorage.setItem('vaullet_google_access_token', token);
+        console.log('✅ [DRIVE] Got fresh access token');
+        return token;
+      }
+    }catch(e){
+      console.error('❌ [DRIVE] Could not get access token:', e);
+    }
+    return null;
+  },
   async download(fileId){
     try{
       // Use stored Google access token for Drive API
@@ -295,15 +360,24 @@ const Drive = {
       
       if(!token){
         console.warn('⚠️ [DRIVE] No access token found, requesting...');
-        // Fallback to ensureToken if no token stored
-        token = await this.ensureToken();
+        token = await this.getAccessToken();
+        if(!token) token = await this.ensureToken();
       } else {
         console.log('✅ [DRIVE] Using stored Google access token');
       }
       
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, 
+      let res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, 
         {headers:{Authorization:'Bearer '+token}}
       );
+      
+      // If token expired, try again with fresh token
+      if(res.status === 401){
+        console.log('🔄 [DRIVE] Token expired, getting fresh one...');
+        token = await this.ensureToken();
+        res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, 
+          {headers:{Authorization:'Bearer '+token}}
+        );
+      }
       
       if(!res.ok) throw new Error(`Drive download failed (HTTP ${res.status})`);
       return await res.arrayBuffer();
@@ -314,8 +388,12 @@ const Drive = {
   },
   async listVaultFiles(){
     try{
+      console.log('🔍 [DRIVE SYNC] Starting listVaultFiles...');
       const vaultFolderId = await this.ensureVaultFolder();
+      console.log('✅ [DRIVE SYNC] Vault folder ID:', vaultFolderId);
+      
       const token = localStorage.getItem('vaullet_google_access_token');
+      console.log('🔐 [DRIVE SYNC] Access token available:', !!token);
       
       if(!token){
         console.warn('⚠️ [DRIVE] No access token, cannot sync');
@@ -323,19 +401,33 @@ const Drive = {
       }
       
       const q = `'${vaultFolderId}' in parents and trashed=false`;
+      console.log('🔍 [DRIVE SYNC] Query:', q);
+      
       const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,createdTime,modifiedTime,size)&pageSize=1000`, {
         headers:{Authorization:'Bearer '+token}
       });
       
-      if(!res.ok) throw new Error(`Drive list failed (HTTP ${res.status})`);
+      console.log('📡 [DRIVE SYNC] Response status:', res.status);
+      
+      if(!res.ok){
+        const errText = await res.text();
+        console.error('❌ [DRIVE SYNC] Response error:', errText);
+        throw new Error(`Drive list failed (HTTP ${res.status})`);
+      }
+      
       const data = await res.json();
+      console.log('📋 [DRIVE SYNC] Files found:', data.files ? data.files.length : 0);
+      console.log('📋 [DRIVE SYNC] All files:', data.files);
       
       // Accept all files (encrypted .enc, PDFs, images, etc.) - exclude folders
       const files = (data.files||[]).filter(f => f.mimeType !== 'application/vnd.google-apps.folder');
-      console.log(`✅ [DRIVE SYNC] Found ${files.length} files in vault (including: .enc, PDF, images, etc.)`);
+      console.log(`✅ [DRIVE SYNC] Filtered ${files.length} files (excluding folders)`);
+      files.forEach(f => console.log(`   - ${f.name} (${f.mimeType})`));
+      
       return files;
     }catch(e){
       console.error('❌ [DRIVE SYNC] Failed to list files:', e.message);
+      console.error('❌ [DRIVE SYNC] Full error:', e);
       return [];
     }
   },
@@ -1158,7 +1250,7 @@ function wireContentEvents(){
   document.querySelectorAll('[data-action="new-cat"]').forEach(b=>b.onclick=()=>document.getElementById('catModal').classList.add('active'));
   document.querySelectorAll('[data-action="fav"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); toggleFavorite(b.dataset.id); });
   document.querySelectorAll('[data-action="reveal"]').forEach(b=>b.onclick=()=>requestReveal(b.dataset.id));
-  document.querySelectorAll('[data-action="file-menu"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); viewDocument(b.dataset.id); });
+  document.querySelectorAll('[data-action="file-menu"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openFileMenu(b.dataset.id); });
   document.querySelectorAll('.doc-row[data-action="open"]').forEach(r=>r.onclick=(e)=>{ 
     if(e.target.closest('[data-action="fav"]') || e.target.closest('[data-action="file-menu"]')) return;
     const id = r.dataset.id;
