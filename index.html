@@ -53,6 +53,11 @@ if(window.pdfjsLib) {
   <nav class="rail" id="rail"></nav>
   <main>
     <div class="topbar">
+      <button class="hamburger" id="hamburgerBtn" title="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
       <div>
         <div class="page-title display" id="pageTitle">Home</div>
         <div class="page-sub" id="pageSub"></div>
@@ -70,7 +75,18 @@ if(window.pdfjsLib) {
   </main>
 </div>
 
-<!-- ============ MODAL: ADD/EDIT DOCUMENT ============ -->
+<!-- Mobile Sidebar Navigation -->
+<div class="mobile-sidebar-overlay" id="sidebarOverlay"></div>
+<nav class="mobile-sidebar" id="mobileSidebar">
+  <button class="sidebar-close" id="sidebarClose">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  </button>
+  <div id="mobileSidebarNav"></div>
+</nav>
+
+<!-- Bottom Mobile Navigation -->
 <div class="overlay" id="docModal">
   <div class="modal">
     <div class="modal-head">
