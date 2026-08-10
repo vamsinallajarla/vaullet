@@ -196,10 +196,11 @@ const Drive = {
       if(window.google && google.accounts && google.accounts.oauth2){
         this.tokenClient = google.accounts.oauth2.initTokenClient({
           client_id: cfg.clientId,
-          scope: 'https://www.googleapis.com/auth/drive.file',
+          scope: 'https://www.googleapis.com/auth/drive',  // Full Drive access (not just drive.file)
           callback: (resp)=>{
             if(resp && resp.access_token){
               this.accessToken = resp.access_token;
+              localStorage.setItem('vaullet_google_access_token', resp.access_token);
               this.tokenExpiry = Date.now() + ((resp.expires_in||3600)*1000) - 60000;
               if(this._resolve){ this._resolve(this.accessToken); this._resolve=null; this._reject=null; }
             } else if(this._reject){ this._reject(new Error('Google did not return an access token')); this._resolve=null; this._reject=null; }
@@ -794,17 +795,27 @@ let fileMenuTargetId = null;
 let fileMoveMode = null; // 'move' or 'copy'
 
 function openFileMenu(id){
+  console.log('📋 [MENU] Opening file menu for:', id);
   fileMenuTargetId = id;
   const modal = document.getElementById('fileMenuModal');
+  if(!modal){
+    console.warn('⚠️ [MENU] File menu modal not found!');
+    return;
+  }
   modal.classList.add('active');
+  console.log('✅ [MENU] File menu opened');
 }
 
 async function openRenameModal(){
+  console.log('🔧 [MENU] Opening rename modal for:', fileMenuTargetId);
   const d = State.documents.find(x=>x.id===fileMenuTargetId);
-  if(!d) return;
+  if(!d){
+    console.warn('⚠️ [MENU] Document not found:', fileMenuTargetId);
+    return;
+  }
   document.getElementById('f_newname').value = d.name;
-  document.getElementById('renameModal').classList.add('active');
   closeModals();
+  document.getElementById('renameModal').classList.add('active');
 }
 
 async function renameFile(){
@@ -826,17 +837,22 @@ async function renameFile(){
 }
 
 async function openMoveModal(mode){
+  console.log('📁 [MENU] Opening move/copy modal, mode:', mode);
   fileMoveMode = mode; // 'move' or 'copy'
   const catSel = document.getElementById('f_targetCategory');
   catSel.innerHTML = State.categories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
   
   const d = State.documents.find(x=>x.id===fileMenuTargetId);
-  if(d) catSel.value = d.category;
+  if(!d){
+    console.warn('⚠️ [MENU] Document not found:', fileMenuTargetId);
+    return;
+  }
+  catSel.value = d.category;
   
   document.getElementById('moveModalTitle').textContent = mode==='move' ? 'Move to category' : 'Copy to category';
   document.getElementById('confirmMoveBtn').textContent = mode==='move' ? 'Move' : 'Copy';
-  document.getElementById('moveModal').classList.add('active');
   closeModals();
+  document.getElementById('moveModal').classList.add('active');
 }
 
 async function moveOrCopyFile(){
@@ -858,6 +874,7 @@ async function moveOrCopyFile(){
       toast('File copied to ' + targetCategory);
     }
     closeModals();
+    render();
   }catch(e){
     console.error('Move/Copy failed:', e);
     toast('Could not move/copy file');
@@ -865,12 +882,16 @@ async function moveOrCopyFile(){
 }
 
 async function openDeleteModal(){
+  console.log('🗑️ [MENU] Opening delete modal for:', fileMenuTargetId);
   const d = State.documents.find(x=>x.id===fileMenuTargetId);
-  if(!d) return;
+  if(!d){
+    console.warn('⚠️ [MENU] Document not found:', fileMenuTargetId);
+    return;
+  }
   
   document.getElementById('deleteFileName').textContent = escapeHtml(d.name);
-  document.getElementById('deleteModal').classList.add('active');
   closeModals();
+  document.getElementById('deleteModal').classList.add('active');
 }
 
 async function deleteFileConfirmed(){
@@ -1584,10 +1605,34 @@ document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click', e=>
 /* ===== FILE MANAGEMENT MODAL HANDLERS ===== */
 const fileMenuModal = document.getElementById('fileMenuModal');
 if(fileMenuModal){
-  fileMenuModal.querySelectorAll('[data-action="file-rename"]').forEach(b=>b.onclick=openRenameModal);
-  fileMenuModal.querySelectorAll('[data-action="file-move"]').forEach(b=>b.onclick=()=>openMoveModal('move'));
-  fileMenuModal.querySelectorAll('[data-action="file-copy"]').forEach(b=>b.onclick=()=>openMoveModal('copy'));
-  fileMenuModal.querySelectorAll('[data-action="file-delete"]').forEach(b=>b.onclick=openDeleteModal);
+  fileMenuModal.querySelectorAll('[data-action="file-rename"]').forEach(b=>{
+    b.onclick = async (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      await openRenameModal();
+    };
+  });
+  fileMenuModal.querySelectorAll('[data-action="file-move"]').forEach(b=>{
+    b.onclick = async (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      await openMoveModal('move');
+    };
+  });
+  fileMenuModal.querySelectorAll('[data-action="file-copy"]').forEach(b=>{
+    b.onclick = async (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      await openMoveModal('copy');
+    };
+  });
+  fileMenuModal.querySelectorAll('[data-action="file-delete"]').forEach(b=>{
+    b.onclick = async (e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      await openDeleteModal();
+    };
+  });
 }
 
 const confirmRenameBtn = document.getElementById('confirmRenameBtn');
