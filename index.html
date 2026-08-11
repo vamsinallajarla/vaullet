@@ -737,14 +737,14 @@ a{ color:var(--brass); }
    and Google OAuth client before deploying.
    ========================================================== */
 const firebaseConfig = {
-  apiKey: "AIzaSyAof9i_z4-HlCnpY2_2gMtvr7TwfZ2ACjw",
-  authDomain: "vaullet-app.firebaseapp.com",
-  projectId: "vaullet-app",
-  storageBucket: "vaullet-app.firebasestorage.app",
-  messagingSenderId: "143807110292",
-  appId: "1:143807110292:web:f6910c62d611c34027a881"
+  apiKey: "YOUR_FIREBASE_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
-const GOOGLE_CLIENT_ID = "840290523953-u9jdtr6m7hqqebogn50iit029qpuc868.apps.googleusercontent.com"; // used only for Drive access, not sign-in
+const GOOGLE_CLIENT_ID = "YOUR_CLIENT_ID.apps.googleusercontent.com"; // used only for Drive access, not sign-in
 const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 const ALLOWED_EMAIL_DOMAIN = "vaullet.in"; // sign-in restricted to user@vaullet.in
 const ROOT_FOLDER_NAME_DEFAULT = "Vaullet";
@@ -984,7 +984,21 @@ onAuthStateChanged(auth, async (user)=>{
     }
     state.user = user;
     document.getElementById("authScreen").style.display = "none";
+
+    // Try to get a Drive token silently first — if the user already
+    // granted the drive.file scope earlier in this browser session,
+    // Google Identity Services can hand back a fresh token with no
+    // popup and no re-consent. Only fall back to the visible
+    // "Connect Google Drive" screen if that silent attempt fails
+    // (e.g. first time ever, or the browser session was cleared).
     document.getElementById("connectScreen").style.display = "flex";
+    try{
+      await requestDriveToken({ silent: true });
+      await enterMainApp();
+    } catch(e){
+      // Silent attempt failed — stay on the connect screen so the
+      // user can grant access once via the visible consent flow.
+    }
   } else {
     state.user = null;
     document.getElementById("mainScreen").style.display = "none";
