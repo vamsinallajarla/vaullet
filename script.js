@@ -715,35 +715,49 @@ let pinTarget = 6;
 let pinMode = null; // 'setup' | 'unlock'
 
 async function initAuthScreen(){
-  // Create mobile-optimized PIN entry screen HTML
+  // Create new circular PIN entry screen with SVG logo
   document.getElementById('lock').innerHTML = `
-    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:16px 20px; width:100%; max-width:100%;">
-      <div style="width:100%; max-width:100%; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-        
-        <!-- Title -->
-        <div class="modal-title display" id="lockTitle" style="margin-bottom:8px; text-align:center; font-size:20px; line-height:1.3;">Set your vault PIN</div>
-        
-        <!-- Subtitle -->
-        <div class="help-text" id="lockSub" style="margin-bottom:24px; text-align:center; font-size:13px; line-height:1.4;">Welcome! Choose a 6-digit PIN to encrypt your vault.</div>
-        
-        <!-- Dial (smaller for mobile) -->
-        <div id="dialContainer" style="display:flex; justify-content:center; margin-bottom:24px; flex-shrink:0;">
-          <canvas id="pinDial" width="140" height="140" style="width:140px; height:140px;"></canvas>
-        </div>
-        
-        <!-- PIN Dots -->
-        <div id="pinDots" style="display:flex; justify-content:center; gap:8px; margin-bottom:28px; flex-shrink:0;"></div>
-        
-        <!-- Keypad (larger buttons for touch) -->
-        <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:20px; width:100%; max-width:280px; flex-shrink:0;"></div>
-        
-        <!-- Error message -->
-        <div id="lockError" class="help-text" style="color:var(--alert); text-align:center; min-height:18px; font-size:12px;"></div>
+    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; width:100%;">
+      
+      <!-- Circular Logo with SVG -->
+      <div style="position:relative; width:180px; height:180px; margin-bottom:40px; flex-shrink:0;">
+        <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%;">
+          <!-- Outer circles -->
+          <circle cx="100" cy="100" r="95" fill="none" stroke="var(--brass)" stroke-width="2" opacity="0.3"/>
+          <circle cx="100" cy="100" r="90" fill="none" stroke="var(--brass)" stroke-width="1.5" opacity="0.2"/>
+          
+          <!-- Inner circle -->
+          <circle cx="100" cy="100" r="70" fill="var(--charcoal)" stroke="var(--brass)" stroke-width="2"/>
+          
+          <!-- Upload icon (folder with arrow) -->
+          <g transform="translate(100, 100)">
+            <!-- Folder shape -->
+            <path d="M -30 -15 L -10 -15 L -5 -25 L 30 -25 L 30 25 L -30 25 Z" fill="none" stroke="var(--brass)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <!-- Upload arrow -->
+            <path d="M -5 10 L -5 -5 M -10 0 L -5 -5 L 0 0" fill="none" stroke="var(--brass)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+        </svg>
       </div>
+      
+      <!-- Title and Subtitle -->
+      <div style="text-align:center; margin-bottom:45px;">
+        <div class="modal-title display" id="lockTitle" style="font-size:24px; margin-bottom:8px; font-weight:600;">Enter your PIN</div>
+        <div class="help-text" id="lockSub" style="font-size:13px; color:var(--steel); max-width:280px;">6-digit code to unlock your secure vault</div>
+      </div>
+      
+      <!-- PIN Dots -->
+      <div id="pinDots" style="display:flex; justify-content:center; gap:12px; margin-bottom:40px; flex-shrink:0;"></div>
+      
+      <!-- Error Message -->
+      <div id="lockError" class="help-text" style="color:var(--alert); text-align:center; min-height:16px; font-size:12px; margin-bottom:30px;"></div>
+      
+      <!-- Keypad -->
+      <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; width:100%; max-width:280px; margin-bottom:20px; flex-shrink:0;"></div>
+      
     </div>
   `;
   
-  drawDial();
+  // SVG logo is already rendered, no canvas dial needed
   let storedSalt = await LocalDB.getConfig('salt');
   
   // If no local salt, check Firestore (for multi-device sync)
@@ -1606,13 +1620,33 @@ function cardHtml(d){
       <div class="wc-type">${escapeHtml(d.category)}</div>
       <button class="wc-fav" data-action="fav" data-id="${d.id}">${d.favorite?'★':'☆'}</button>
     </div>
-    <div class="wc-number mono" data-masked="true" data-id="${d.id}">${maskNumber(d.number)}</div>
+    
+    <!-- Card number (masked/revealed) -->
+    <div class="wc-number mono" data-masked="true" data-id="${d.id}" data-real="${escapeHtml(d.number)}">${maskNumber(d.number)}</div>
+    
+    <!-- Card details (expiry and CVV visible on reveal) -->
+    <div class="wc-details" data-id="${d.id}" style="display:none; font-size:11px; color:var(--steel); margin-top:8px;">
+      <div style="display:flex; gap:20px;">
+        <div>
+          <div class="wc-label">Expiry</div>
+          <div class="wc-value mono">${escapeHtml(d.expiry || 'N/A')}</div>
+        </div>
+        <div>
+          <div class="wc-label">CVV</div>
+          <div class="wc-value mono">${escapeHtml(d.cvv || 'N/A')}</div>
+        </div>
+      </div>
+    </div>
+    
     <div class="wc-bottom">
       <div>
         <div class="wc-label">Name</div>
         <div class="wc-value">${escapeHtml(d.name)}</div>
       </div>
-      <button class="wc-reveal" data-action="reveal" data-id="${d.id}">Reveal</button>
+      <div style="display:flex; gap:8px;">
+        <button class="wc-reveal" data-action="reveal" data-id="${d.id}">Reveal</button>
+        <button class="wc-reveal" data-action="edit-card" data-id="${d.id}" style="background:var(--graphite); color:var(--brass);">Edit</button>
+      </div>
     </div>
   </div>`;
 }
@@ -1740,7 +1774,14 @@ function wireContentEvents(){
   document.querySelectorAll('[data-action="filter-cat"]').forEach(b=>b.onclick=()=>{ State.activeCategory=b.dataset.cat; render(); });
   document.querySelectorAll('[data-action="new-cat"]').forEach(b=>b.onclick=()=>document.getElementById('catModal').classList.add('active'));
   document.querySelectorAll('[data-action="fav"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); toggleFavorite(b.dataset.id); });
-  document.querySelectorAll('[data-action="reveal"]').forEach(b=>b.onclick=()=>requestReveal(b.dataset.id));
+  document.querySelectorAll('[data-action="reveal"]').forEach(b=>b.onclick=(e)=>{ 
+    e.stopPropagation();
+    requestReveal(b.dataset.id);
+  });
+  document.querySelectorAll('[data-action="edit-card"]').forEach(b=>b.onclick=(e)=>{ 
+    e.stopPropagation();
+    editCard(b.dataset.id);
+  });
   document.querySelectorAll('[data-action="file-menu"]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openFileMenu(b.dataset.id); });
   document.querySelectorAll('.doc-row[data-action="open"]').forEach(r=>r.onclick=(e)=>{ 
     if(e.target.closest('[data-action="fav"]') || e.target.closest('[data-action="file-menu"]')) return;
@@ -2028,15 +2069,57 @@ async function tryAuth(id){
   if(check===verifier){
     document.getElementById('authModal').classList.remove('active');
     const d = State.documents.find(x=>x.id===id);
-    const el = document.querySelector(`.wc-number[data-id="${id}"]`);
-    if(el && d){ el.textContent = d.number || '—'; el.dataset.masked='false';
-      setTimeout(()=>{ el.textContent = maskNumber(d.number); el.dataset.masked='true'; }, 8000);
+    
+    // Reveal card number
+    const numberEl = document.querySelector(`.wc-number[data-id="${id}"]`);
+    if(numberEl && d){ 
+      numberEl.textContent = d.number || '—'; 
+      numberEl.dataset.masked='false';
+      // Auto-hide after 10 seconds
+      setTimeout(()=>{ 
+        numberEl.textContent = maskNumber(d.number); 
+        numberEl.dataset.masked='true';
+      }, 10000);
     }
+    
+    // Show expiry and CVV
+    const detailsEl = document.querySelector(`.wc-details[data-id="${id}"]`);
+    if(detailsEl){ 
+      detailsEl.style.display = 'block';
+      // Auto-hide after 10 seconds
+      setTimeout(()=>{ 
+        detailsEl.style.display = 'none';
+      }, 10000);
+    }
+    
+    console.log('🔓 [CARD] Card details revealed for 10 seconds');
   } else {
     document.getElementById('authError').textContent='Incorrect PIN.';
     authPin='';
     renderPinDots(document.getElementById('authPinDots'), authPinTarget, 0);
   }
+}
+
+async function editCard(id){
+  console.log('✏️ [CARD] Editing card:', id);
+  const card = State.documents.find(d=>d.id===id);
+  if(!card) return;
+  
+  // Populate form with card data
+  document.getElementById('f_name').value = card.name || '';
+  document.getElementById('f_number').value = card.number || '';
+  document.getElementById('f_cvv').value = card.cvv || '';
+  document.getElementById('f_expiry').value = card.expiry || '';
+  document.getElementById('f_category').value = card.category || 'Cards';
+  
+  // Set edit mode
+  editingDocId = id;
+  editingDocType = 'card';
+  
+  const btn = document.getElementById('docSaveBtn');
+  btn.textContent = '💾 Update card';
+  
+  openDocModal('card');
 }
 
 /* ===== BACKUP ===== */
@@ -2357,4 +2440,3 @@ function resetInactivity(){
   
   console.log('🔍 [BOOT] Boot sequence complete, auth listener active');
 })();
-
