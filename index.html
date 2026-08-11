@@ -263,6 +263,11 @@ a{ color:var(--brass); }
 .side-item.active{ background:var(--surface-2); color:var(--text); border-color:var(--border); }
 .side-item .count{ font-size:11px; color:var(--text-faint); font-family:var(--font-mono); }
 .side-item .dot-cat{ width:8px;height:8px;border-radius:2px;margin-right:8px;flex:none; }
+.menu-toggle{ display:none; }
+.sidebar-backdrop{
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5);
+  z-index:55;
+}
 
 .main{ flex:1; padding:22px 26px 60px; overflow-y:auto; min-width:0; }
 .main-header{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
@@ -490,7 +495,16 @@ a{ color:var(--brass); }
 .theme-toggle{ background:none; border:1px solid var(--border); border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:var(--text-dim); }
 
 @media (max-width: 760px){
-  .sidebar{ display:none; }
+  .menu-toggle{ display:inline-flex; }
+  .sidebar{
+    position:fixed; top:0; left:0; height:100vh; width:250px;
+    max-width:80vw; z-index:60; overflow-y:auto;
+    transform:translateX(-100%);
+    transition:transform .25s ease;
+    box-shadow:2px 0 24px rgba(0,0,0,0.35);
+  }
+  .sidebar.open{ transform:translateX(0); }
+  .sidebar-backdrop.open{ display:block; }
   .topnav{ flex-wrap:wrap; }
   .searchbar{ order:3; max-width:100%; flex-basis:100%; }
   .main{ padding:16px; }
@@ -570,6 +584,9 @@ a{ color:var(--brass); }
   <div id="mainScreen" style="display:none; flex-direction:column; flex:1;">
 
     <div class="topnav">
+      <button class="btn btn-icon menu-toggle" id="menuToggleBtn" title="Categories & menu">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
       <div class="logo"><span class="logo-mark"></span> Vaullet</div>
       <div class="searchbar">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -589,8 +606,9 @@ a{ color:var(--brass); }
       </button>
     </div>
 
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
     <div class="layout">
-      <div class="sidebar">
+      <div class="sidebar" id="sidebar">
         <h4>Categories</h4>
         <div class="side-item active" data-cat="all"><span>All items</span><span class="count" id="count-all">0</span></div>
         <div class="side-item" data-cat="IDs"><span><span class="dot-cat" style="background:#c9a15a"></span>IDs</span><span class="count" id="count-IDs">0</span></div>
@@ -733,17 +751,22 @@ a{ color:var(--brass); }
 
 <script type="module">
 /* ==========================================================
-   CONFIG — credentials live in two sibling files instead of
-   inline here, so this file has no secrets to accidentally
-   commit or share:
-     ./firebase_config.js   ->  export const firebaseConfig = {...}
-     ./google_config.js     ->  export const GOOGLE_CLIENT_ID = "..."
-   Both must sit next to this HTML file (same folder) when
-   deployed, since they're loaded as relative ES module imports.
+   CONFIGURE THESE — replace with your own Firebase project
+   and Google OAuth client before deploying. Kept inline (not
+   in separate files) so this single HTML file never depends
+   on sibling files loading correctly — a missing/misnamed
+   external config file silently breaks the entire module,
+   including every button on the page.
    ========================================================== */
-import { firebaseConfig } from "./firebase_config.js";
-import { GOOGLE_CLIENT_ID } from "./google_config.js";
-
+const firebaseConfig = {
+  apiKey: "AIzaSyAof9i_z4-HlCnpY2_2gMtvr7TwfZ2ACjw",
+  authDomain: "vaullet-app.firebaseapp.com",
+  projectId: "vaullet-app",
+  storageBucket: "vaullet-app.firebasestorage.app",
+  messagingSenderId: "143807110292",
+  appId: "1:143807110292:web:f6910c62d611c34027a881"
+};
+const GOOGLE_CLIENT_ID = "840290523953-u9jdtr6m7hqqebogn50iit029qpuc868.apps.googleusercontent.com"; // used only for Drive access, not sign-in
 const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 const ALLOWED_EMAIL_DOMAIN = "vaullet.in"; // sign-in restricted to user@vaullet.in
 const ROOT_FOLDER_NAME_DEFAULT = "Vaullet";
@@ -1257,12 +1280,27 @@ document.querySelectorAll(".side-item[data-cat]").forEach(el=>{
     document.getElementById("mainTitle").textContent =
       state.activeCategory === "all" ? "All items" : el.querySelector("span").textContent;
     renderGrid();
+    closeSidebarDrawer();
   });
 });
 document.getElementById("searchInput").addEventListener("input", (e)=>{
   state.searchTerm = e.target.value.trim();
   renderGrid();
 });
+
+/* Mobile sidebar drawer: opened via the hamburger button in the
+   top nav, closed via the backdrop tap or after picking a category. */
+function openSidebarDrawer(){
+  document.getElementById("sidebar").classList.add("open");
+  document.getElementById("sidebarBackdrop").classList.add("open");
+}
+function closeSidebarDrawer(){
+  document.getElementById("sidebar").classList.remove("open");
+  document.getElementById("sidebarBackdrop").classList.remove("open");
+}
+document.getElementById("menuToggleBtn").addEventListener("click", openSidebarDrawer);
+document.getElementById("sidebarBackdrop").addEventListener("click", closeSidebarDrawer);
+
 
 /* ==========================================================
    MODALS — generic open/close
@@ -1544,6 +1582,7 @@ document.getElementById("downloadItemBtn").addEventListener("click", ()=>{
 document.getElementById("settingsBtn").addEventListener("click", ()=>{
   document.getElementById("rootFolderInput").value = state.rootFolderName || ROOT_FOLDER_NAME_DEFAULT;
   openModal("settingsModal");
+  closeSidebarDrawer();
 });
 
 document.getElementById("renameFolderBtn").addEventListener("click", async ()=>{
@@ -1572,6 +1611,7 @@ document.getElementById("exportBtn").addEventListener("click", ()=>{
   const a = document.createElement("a");
   a.href = url; a.download = "vault-index.json"; a.click();
   URL.revokeObjectURL(url);
+  closeSidebarDrawer();
 });
 
 /* Network status on load */
