@@ -132,12 +132,14 @@ const Cloud = {
   },
   
   loginWithEmail(email, password){
+    if(!this.auth) throw new Error('Firebase not initialized yet');
     const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
     if(!fullEmail.endsWith('@vaullet.in')) throw new Error('Email must be @vaullet.in');
     return this.auth.signInWithEmailAndPassword(fullEmail, password);
   },
   
   registerWithEmail(email, password){
+    if(!this.auth) throw new Error('Firebase not initialized yet');
     const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
     if(!fullEmail.endsWith('@vaullet.in')) throw new Error('Email must be @vaullet.in');
     if(password.length < 8) throw new Error('Password min 8 chars');
@@ -457,8 +459,8 @@ function escapeHtml(text){
 })();
 
 /* ===== AUTH BUTTON WIRING ===== */
-document.addEventListener('DOMContentLoaded', ()=>{
-  console.log('🔌 [DOM] Wiring buttons');
+function wireAuthButtons(){
+  console.log('🔌 [AUTH] Wiring buttons');
   
   const loginBtn = document.getElementById('loginBtn');
   const registerBtn = document.getElementById('registerBtn');
@@ -527,5 +529,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
     };
   }
   
-  console.log('✅ [DOM] Buttons wired');
-});
+  console.log('✅ [AUTH] Buttons wired');
+}
+
+// Wait for both DOM and Firebase
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', () => setTimeout(wireAuthButtons, 500));
+} else {
+  setTimeout(wireAuthButtons, 500);
+}
