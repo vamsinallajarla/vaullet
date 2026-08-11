@@ -140,14 +140,26 @@ const Cloud = {
       return true;
     }catch(e){ console.warn("Cloud sync unavailable:", e.message); this.configured=false; return false; }
   },
-  signInWithGoogle(){
+  loginWithEmail(email, password){
     if(!this.auth) throw new Error("Firebase Auth not initialized");
-    const provider = new firebase.auth.GoogleAuthProvider();
-    // Request full Drive access (not just files created by this app)
-    provider.addScope('https://www.googleapis.com/auth/drive');
-    provider.addScope('profile');
-    provider.addScope('email');
-    return this.auth.signInWithPopup(provider);
+    const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
+    if(!fullEmail.endsWith('@vaullet.in')){
+      throw new Error('Email must be @vaullet.in domain');
+    }
+    console.log('🔐 [AUTH] Logging in:', fullEmail);
+    return this.auth.signInWithEmailAndPassword(fullEmail, password);
+  },
+  registerWithEmail(email, password){
+    if(!this.auth) throw new Error("Firebase Auth not initialized");
+    const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
+    if(!fullEmail.endsWith('@vaullet.in')){
+      throw new Error('Email must be @vaullet.in domain');
+    }
+    if(password.length < 8){
+      throw new Error('Password must be at least 8 characters');
+    }
+    console.log('📝 [AUTH] Registering:', fullEmail);
+    return this.auth.createUserWithEmailAndPassword(fullEmail, password);
   },
   signOut(){
     return this.auth.signOut();
@@ -160,7 +172,7 @@ const Cloud = {
   },
   col(){ 
     if(!this.auth.currentUser) throw new Error('Not signed in');
-    return this.db.collection("vaults").doc(this.auth.currentUser.uid).collection("items"); 
+    return this.db.collection("users").doc(this.auth.currentUser.uid).collection("documents"); 
   },
   async push(encryptedItem){
     if(!this.configured || !this.auth.currentUser) return {ok:false};
@@ -766,11 +778,11 @@ async function initAuthScreen(){
       const userId = Cloud.auth.currentUser.uid;
       console.log('🔍 [MULTIDEVICE] Checking Firestore for PIN salt, user:', userId);
       
-      const vaultDoc = await Cloud.db.collection('vaults').doc(userId).get();
+      const userDoc = await Cloud.db.collection('users').doc(userId).get();
       console.log('📋 [MULTIDEVICE] Firestore document exists:', vaultDoc.exists);
       
-      if(vaultDoc.exists){
-        const data = vaultDoc.data();
+      if(userDoc.exists){
+        const data = userDoc.data();
         console.log('📋 [MULTIDEVICE] Document data keys:', Object.keys(data || {}));
         
         if(data && data.salt){
@@ -796,7 +808,7 @@ async function initAuthScreen(){
   
   document.getElementById('lockTitle').textContent = pinMode==='setup' ? 'Set your vault PIN' : 'Enter your PIN';
   document.getElementById('lockSub').textContent = pinMode==='setup'
-    ? `Welcome, ${State.googleUser.displayName || State.googleUser.email}! Choose a 6-digit PIN to encrypt your vault.`
+    ? `Welcome, ${Cloud.getCurrentUser().email}! Choose a 6-digit PIN to encrypt your vault.`
     : 'Enter your PIN to unlock your vault.';
   
   renderPinDots(document.getElementById('pinDots'), pinTarget, 0);
@@ -865,7 +877,7 @@ async function finishSetup(){
       email: Cloud.auth.currentUser.email
     };
     
-    await Cloud.db.collection('vaults').doc(userId).set(vaultData, {merge: true});
+    await Cloud.db.collection('users').doc(userId).set({email: Cloud.auth.currentUser.email, salt, verifier, createdAt: firebase.firestore.FieldValue.serverTimestamp(), lastUpdated: firebase.firestore.FieldValue.serverTimestamp()}, {merge: true});
     console.log('✅ [MULTIDEVICE] PIN salt successfully saved to Firestore');
   }catch(e){
     console.error('❌ [MULTIDEVICE] Failed to sync PIN to Firestore:', e);
@@ -2369,13 +2381,22 @@ function resetInactivity(){
       State.googleUser = user;
       console.log('✅ [LOGIN SUCCESS] User authenticated:', user.email);
       
-      // Cache Google Drive token for file preview (so we don't need auth every time)
+      // Request Google Drive access for file storage (separate from Firebase Auth)
       try{
-        const token = await user.getIdToken();
-        localStorage.setItem('vaullet_drive_token', token);
-        console.log('✅ [DRIVE] Access token cached for file previews');
+        console.log('🔑 [DRIVE] Requesting Google Drive access...');
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: window.VAULLET_GOOGLE_CONFIG?.clientId,
+          scope: 'https://www.googleapis.com/auth/drive',
+          callback: (response) => {
+            if(response.access_token){
+              localStorage.setItem('vaullet_google_access_token', response.access_token);
+              console.log('✅ [DRIVE] Google Drive access granted');
+            }
+          }
+        });
+        tokenClient.requestAccessToken();
       }catch(e){
-        console.warn('⚠️ [DRIVE] Could not cache Drive token:', e.message);
+        console.warn('⚠️ [DRIVE] Could not initialize Drive access:', e.message);
       }
       
       document.getElementById('lock').style.display='flex';
@@ -2383,7 +2404,11 @@ function resetInactivity(){
       await initAuthScreen();
       resetInactivity();
     } else {
-      console.log('⚠️ [NO USER] Showing sign-in screen');
+      console.log('⚠️ [NO USER] Showing login screen');
+      // Show auth screen (login/register forms are in index_new.html)
+      document.getElementById('authScreen').style.display = 'flex';
+      document.getElementById('lock').style.display = 'none';
+      document.getElementById('app').classList.remove('active');
       // Not signed in - show login screen
       document.getElementById('lock').innerHTML = `<div style="text-align:center;">
         <div class="modal-title display" style="margin-bottom:20px; font-size:24px;">Vaullet</div>
@@ -2398,41 +2423,90 @@ function resetInactivity(){
           Sign in
         </button>
       </div>`;
-      const btn = document.getElementById('googleSignInBtn');
-      if(btn){
-        btn.disabled = false;
-        btn.onclick = async ()=>{
+      // Firebase Email/Password Auth - Login Form
+      const loginBtn = document.getElementById('loginBtn');
+      const registerBtn = document.getElementById('registerBtn');
+      const switchToRegister = document.getElementById('switchToRegister');
+      const switchToLogin = document.getElementById('switchToLogin');
+      
+      if(loginBtn){
+        loginBtn.onclick = async ()=>{
           try{
-            btn.disabled = true;
-            btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg> Signing in…`;
-            console.log('🔍 [BUTTON CLICK] Starting sign-in popup...');
-            const result = await Cloud.signInWithGoogle();
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Signing in...';
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
             
-            // Extract Google access token from credential
-            if(result.credential && result.credential.accessToken){
-              localStorage.setItem('vaullet_google_access_token', result.credential.accessToken);
-              console.log('✅ [DRIVE] Google access token stored for Drive API');
+            if(!email || !password){
+              throw new Error('Please enter email and password');
             }
             
-            console.log('✅ [POPUP SUCCESS] User signed in from popup:', result.user.email);
-            // Auth state listener will handle the UI update
+            console.log('🔐 [AUTH] Logging in with email/password');
+            await Cloud.loginWithEmail(email, password);
+            console.log('✅ [AUTH] Login successful');
+            
+            document.getElementById('loginEmail').value = '';
+            document.getElementById('loginPassword').value = '';
+            document.getElementById('loginError').textContent = '';
           }catch(e){
-            console.error('❌ [ERROR] Google sign-in failed:', e.message);
-            console.error('Full error:', e);
-            toast('Sign-in error: ' + e.message);
-            btn.disabled = false;
-            btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg> Sign in`;
+            console.error('❌ [AUTH] Login failed:', e.message);
+            document.getElementById('loginError').textContent = e.message;
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Login';
           }
+        };
+      }
+      
+      if(registerBtn){
+        registerBtn.onclick = async ()=>{
+          try{
+            registerBtn.disabled = true;
+            registerBtn.textContent = 'Creating account...';
+            const email = document.getElementById('registerEmail').value.trim();
+            const password = document.getElementById('registerPassword').value;
+            const confirm = document.getElementById('registerConfirm').value;
+            
+            if(!email || !password || !confirm){
+              throw new Error('Please fill all fields');
+            }
+            
+            if(password !== confirm){
+              throw new Error('Passwords do not match');
+            }
+            
+            console.log('📝 [AUTH] Registering new user');
+            await Cloud.registerWithEmail(email, password);
+            console.log('✅ [AUTH] Registration successful');
+            
+            document.getElementById('registerEmail').value = '';
+            document.getElementById('registerPassword').value = '';
+            document.getElementById('registerConfirm').value = '';
+            document.getElementById('registerError').textContent = '';
+            
+            // Auto-switch to login form
+            document.getElementById('registerForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+            toast('Account created! Please log in.');
+          }catch(e){
+            console.error('❌ [AUTH] Registration failed:', e.message);
+            document.getElementById('registerError').textContent = e.message;
+            registerBtn.disabled = false;
+            registerBtn.textContent = 'Create Account';
+          }
+        };
+      }
+      
+      if(switchToRegister){
+        switchToRegister.onclick = ()=>{
+          document.getElementById('loginForm').style.display = 'none';
+          document.getElementById('registerForm').style.display = 'block';
+        };
+      }
+      
+      if(switchToLogin){
+        switchToLogin.onclick = ()=>{
+          document.getElementById('registerForm').style.display = 'none';
+          document.getElementById('loginForm').style.display = 'block';
         };
       }
     }
