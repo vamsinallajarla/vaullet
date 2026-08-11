@@ -709,6 +709,32 @@ function buildKeypad(el, onDigit, onBack){
   }catch(err){
     console.error('❌ [KEYPAD] Error building keypad:', err);
   }
+  
+  // Add keyboard support for PIN entry
+  document.addEventListener('keydown', (e) => {
+    if(!window.pinMode) return; // Only when PIN screen is active
+    
+    const key = e.key;
+    
+    // Number keys 0-9
+    if(key >= '0' && key <= '9'){
+      e.preventDefault();
+      console.log('⌨️ [KEYBOARD] Digit:', key);
+      onDigit(key);
+    }
+    // Backspace to delete
+    else if(key === 'Backspace'){
+      e.preventDefault();
+      console.log('⌨️ [KEYBOARD] Backspace');
+      onBack();
+    }
+    // Enter to submit PIN
+    else if(key === 'Enter'){
+      e.preventDefault();
+      console.log('⌨️ [KEYBOARD] Enter - submitting PIN');
+      setTimeout(() => tryPin(), 200);
+    }
+  }, {once: false});
 }
 
 let pinTarget = 6;
@@ -769,8 +795,8 @@ async function initAuthScreen(){
       const userDoc = await Cloud.db.collection('users').doc(userId).get();
       console.log('📋 [MULTIDEVICE] Firestore document exists:', vaultDoc.exists);
       
-      if(userDoc.exists){
-        const data = userDoc.data();
+      if(vaultDoc.exists){
+        const data = vaultDoc.data();
         console.log('📋 [MULTIDEVICE] Document data keys:', Object.keys(data || {}));
         
         if(data && data.salt){
@@ -2442,9 +2468,9 @@ function resetInactivity(){
 })();
 
 
-// Wire new Firebase Email/Password auth buttons
-function wireNewAuthButtons(){
-  if(!Cloud.auth) { setTimeout(wireNewAuthButtons, 100); return; }
+/* ===== NEW FIREBASE EMAIL/PASSWORD AUTH BUTTONS ===== */
+setTimeout(() => {
+  console.log('🔌 [AUTH WIRE] Wiring new auth buttons');
   
   const loginBtn = document.getElementById('loginBtn');
   const registerBtn = document.getElementById('registerBtn');
@@ -2452,7 +2478,7 @@ function wireNewAuthButtons(){
   const switchToLogin = document.getElementById('switchToLogin');
   
   if(loginBtn){
-    loginBtn.onclick = async (e)=>{
+    loginBtn.onclick = async (e) => {
       e.preventDefault();
       try{
         loginBtn.disabled = true;
@@ -2470,10 +2496,11 @@ function wireNewAuthButtons(){
         loginBtn.textContent = 'Login';
       }
     };
+    console.log('✅ Login button wired');
   }
   
   if(registerBtn){
-    registerBtn.onclick = async (e)=>{
+    registerBtn.onclick = async (e) => {
       e.preventDefault();
       try{
         registerBtn.disabled = true;
@@ -2497,25 +2524,22 @@ function wireNewAuthButtons(){
         registerBtn.textContent = 'Create Account';
       }
     };
+    console.log('✅ Register button wired');
   }
   
   if(switchToRegister){
-    switchToRegister.onclick = ()=>{
+    switchToRegister.onclick = () => {
       document.getElementById('loginForm').style.display = 'none';
       document.getElementById('registerForm').style.display = 'block';
     };
   }
   
   if(switchToLogin){
-    switchToLogin.onclick = ()=>{
+    switchToLogin.onclick = () => {
       document.getElementById('registerForm').style.display = 'none';
       document.getElementById('loginForm').style.display = 'block';
     };
   }
-}
-
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', () => setTimeout(wireNewAuthButtons, 500));
-} else {
-  setTimeout(wireNewAuthButtons, 500);
-}
+  
+  console.log('✅ [AUTH WIRE] All auth buttons wired successfully');
+}, 600);
