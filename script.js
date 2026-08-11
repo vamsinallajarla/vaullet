@@ -140,14 +140,19 @@ const Cloud = {
       return true;
     }catch(e){ console.warn("Cloud sync unavailable:", e.message); this.configured=false; return false; }
   },
-  signInWithGoogle(){
+  // Firebase Email/Password Auth Methods
+  loginWithEmail(email, password){
     if(!this.auth) throw new Error("Firebase Auth not initialized");
-    const provider = new firebase.auth.GoogleAuthProvider();
-    // Request full Drive access (not just files created by this app)
-    provider.addScope('https://www.googleapis.com/auth/drive');
-    provider.addScope('profile');
-    provider.addScope('email');
-    return this.auth.signInWithPopup(provider);
+    const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
+    if(!fullEmail.endsWith('@vaullet.in')) throw new Error('Email must be @vaullet.in');
+    return this.auth.signInWithEmailAndPassword(fullEmail, password);
+  },
+  registerWithEmail(email, password){
+    if(!this.auth) throw new Error("Firebase Auth not initialized");
+    const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
+    if(!fullEmail.endsWith('@vaullet.in')) throw new Error('Email must be @vaullet.in');
+    if(password.length < 8) throw new Error('Password must be at least 8 characters');
+    return this.auth.createUserWithEmailAndPassword(fullEmail, password);
   },
   signOut(){
     return this.auth.signOut();
