@@ -1,74 +1,99 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0">
-<meta name="apple-mobile-web-app-capable" content="true">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Vaullet">
-<meta name="theme-color" content="#0F1418">
-<title>Vaullet — Document & Card Vault</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-app-compat.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-auth-compat.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/10.12.2/firebase-firestore-compat.min.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-if(window.pdfjsLib) {
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-}
-</script>
-<link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vaullet — Document & Card Vault</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23C9A461'/><circle cx='50' cy='50' r='35' fill='%23171F26'/></svg>">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<!-- ============ LOCK SCREEN ============ -->
-<div id="lock">
-  <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; width:100%;">
+<!-- Login/Register Screen -->
+<div id="authScreen" style="position:fixed; inset:0; background:radial-gradient(circle at 50% 30%, var(--charcoal), var(--ink) 70%); display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px;">
+  <div style="width:100%; max-width:420px;">
     
-    <!-- Circular Logo/Icon -->
-    <div style="position:relative; width:200px; height:200px; margin-bottom:40px; flex-shrink:0;">
-      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%;">
-        <!-- Outer circle -->
+    <!-- Logo -->
+    <div style="text-align:center; margin-bottom:40px;">
+      <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="width:100px; height:100px; margin:0 auto;">
         <circle cx="100" cy="100" r="95" fill="none" stroke="var(--brass)" stroke-width="2" opacity="0.3"/>
         <circle cx="100" cy="100" r="90" fill="none" stroke="var(--brass)" stroke-width="1.5" opacity="0.2"/>
-        
-        <!-- Inner circle with upload icon background -->
         <circle cx="100" cy="100" r="70" fill="var(--charcoal)" stroke="var(--brass)" stroke-width="2"/>
-        
-        <!-- Upload icon (folder with arrow) -->
         <g transform="translate(100, 100)">
-          <!-- Folder shape -->
           <path d="M -30 -15 L -10 -15 L -5 -25 L 30 -25 L 30 25 L -30 25 Z" fill="none" stroke="var(--brass)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          <!-- Upload arrow -->
           <path d="M -5 10 L -5 -5 M -10 0 L -5 -5 L 0 0" fill="none" stroke="var(--brass)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
         </g>
       </svg>
     </div>
     
-    <!-- Title and Subtitle -->
-    <div style="text-align:center; margin-bottom:50px;">
-      <div class="lock-title display" id="lockTitle" style="font-size:24px; margin-bottom:8px;">Enter your PIN</div>
-      <div class="lock-sub" id="lockSub" style="font-size:13px; color:var(--steel); max-width:280px;">6-digit code to unlock your secure vault</div>
+    <!-- Title -->
+    <div style="text-align:center; margin-bottom:40px;">
+      <div class="display" style="font-size:28px; font-weight:600; margin-bottom:8px;">Vaullet</div>
+      <div style="color:var(--steel); font-size:13px;">Secure Document & Card Vault</div>
     </div>
     
-    <!-- PIN Dots -->
-    <div id="pinDots" style="display:flex; justify-content:center; gap:12px; margin-bottom:40px; flex-shrink:0;"></div>
+    <!-- Login Form -->
+    <div id="loginForm" style="background:var(--charcoal); border:1px solid var(--hairline); border-radius:16px; padding:32px 24px;">
+      <div class="field">
+        <label>Email</label>
+        <div style="display:flex; gap:0;">
+          <input id="loginEmail" type="text" placeholder="username" style="flex:1; border-radius:9px 0 0 9px;">
+          <div style="padding:10px 12px; background:var(--graphite); border:1px solid var(--hairline); border-left:none; border-radius:0 9px 9px 0; color:var(--steel); font-size:13px; white-space:nowrap;">@vaullet.in</div>
+        </div>
+      </div>
+      
+      <div class="field">
+        <label>Password</label>
+        <input id="loginPassword" type="password" placeholder="Enter password">
+      </div>
+      
+      <div id="loginError" style="color:var(--alert); font-size:12px; margin-bottom:16px; min-height:16px; text-align:center;"></div>
+      
+      <button class="btn btn-brass" id="loginBtn" style="width:100%; margin-bottom:16px;">Login</button>
+      
+      <div style="text-align:center; color:var(--steel); font-size:12px;">
+        Don't have an account? <button id="switchToRegister" class="btn-ghost" style="padding:0; border:none; color:var(--brass); font-weight:600; cursor:pointer;">Register</button>
+      </div>
+    </div>
     
-    <!-- Error Message -->
-    <div id="lockError" class="lock-error" style="min-height:16px; margin-bottom:30px; text-align:center; color:var(--alert); font-size:12px;"></div>
-    
-    <!-- Keypad -->
-    <div id="keypad" style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; max-width:280px; width:100%; margin-bottom:20px;"></div>
+    <!-- Register Form (hidden) -->
+    <div id="registerForm" style="display:none; background:var(--charcoal); border:1px solid var(--hairline); border-radius:16px; padding:32px 24px;">
+      <div class="field">
+        <label>Email</label>
+        <div style="display:flex; gap:0;">
+          <input id="registerEmail" type="text" placeholder="username" style="flex:1; border-radius:9px 0 0 9px;">
+          <div style="padding:10px 12px; background:var(--graphite); border:1px solid var(--hairline); border-left:none; border-radius:0 9px 9px 0; color:var(--steel); font-size:13px; white-space:nowrap;">@vaullet.in</div>
+        </div>
+      </div>
+      
+      <div class="field">
+        <label>Password</label>
+        <input id="registerPassword" type="password" placeholder="Create password (min 8 chars)">
+      </div>
+      
+      <div class="field">
+        <label>Confirm Password</label>
+        <input id="registerConfirm" type="password" placeholder="Confirm password">
+      </div>
+      
+      <div id="registerError" style="color:var(--alert); font-size:12px; margin-bottom:16px; min-height:16px; text-align:center;"></div>
+      
+      <button class="btn btn-brass" id="registerBtn" style="width:100%; margin-bottom:16px;">Create Account</button>
+      
+      <div style="text-align:center; color:var(--steel); font-size:12px;">
+        Already have an account? <button id="switchToLogin" class="btn-ghost" style="padding:0; border:none; color:var(--brass); font-weight:600; cursor:pointer;">Login</button>
+      </div>
+    </div>
     
   </div>
 </div>
 
-<!-- ============ APP SHELL ============ -->
+<!-- PIN Entry Screen -->
+<div id="lock" style="display:none;"></div>
+
+<!-- Main App -->
 <div id="app">
-  <nav class="rail" id="rail"></nav>
+  <aside class="rail" id="rail"></aside>
   <main>
     <div class="topbar">
       <button class="hamburger" id="hamburgerBtn" title="Menu">
@@ -105,30 +130,58 @@ if(window.pdfjsLib) {
 </nav>
 
 <!-- Bottom Mobile Navigation -->
+<nav class="mobile-nav" id="mobileNav"></nav>
+
+<!-- Modals start here -->
 <div class="overlay" id="docModal">
   <div class="modal">
     <div class="modal-head">
-      <div class="modal-title display" id="docModalTitle">Add document</div>
+      <div class="modal-title display" id="docModalTitle">New document</div>
       <button class="modal-close" data-close>&times;</button>
     </div>
     <div class="modal-body">
-      <div class="field"><label>Document name</label><input id="f_name" placeholder="e.g. Passport"></div>
+      <div class="field">
+        <label>Name</label>
+        <input id="f_name" placeholder="e.g. Passport, Tax Return">
+      </div>
+      <div class="field" id="cardFields" style="display:none;">
+        <label>Card number</label>
+        <input id="f_number" type="text" placeholder="1234 5678 9012 3456" inputmode="numeric">
+      </div>
+      <div class="field" id="cardCVVField" style="display:none;">
+        <label>CVV</label>
+        <input id="f_cvv" type="text" placeholder="123" inputmode="numeric" maxlength="4">
+      </div>
       <div class="field-row">
-        <div class="field"><label>Category</label>
-          <select id="f_category"></select>
+        <div class="field" id="dateFieldLeft">
+          <label>Date</label>
+          <input id="f_date" type="date">
         </div>
-        <div class="field"><label>Type</label>
-          <select id="f_type"><option value="document">Document</option><option value="card">Card / Wallet item</option></select>
+        <div class="field" id="expiryFieldRight" style="display:none;">
+          <label>Expiry (MM/YY)</label>
+          <input id="f_expiry" placeholder="12/25" maxlength="5">
         </div>
       </div>
-      <div class="field"><label>Document / ID number</label><input id="f_number" class="mono" placeholder="Stored encrypted, masked by default"></div>
-      <div class="field-row">
-        <div class="field"><label>Issue date</label><input id="f_issue" type="date"></div>
-        <div class="field"><label>Expiry date</label><input id="f_expiry" type="date"></div>
+      <div class="field-row" id="dateRangeFields" style="display:none;">
+        <div class="field">
+          <label>From</label>
+          <input id="f_dateFrom" type="date" placeholder="dd-mm-yyyy">
+        </div>
+        <div class="field">
+          <label>To</label>
+          <input id="f_dateTo" type="date" placeholder="dd-mm-yyyy">
+        </div>
       </div>
-      <div class="field"><label>Tags (comma separated)</label><input id="f_tags" placeholder="e.g. urgent, family, 2026"></div>
-      <div class="field"><label>Notes</label><textarea id="f_notes" rows="3" placeholder="Optional description or notes"></textarea></div>
-      <div class="field"><label>Attach file (PDF / JPG / PNG) or scan</label>
+      <div class="field">
+        <label>Category</label>
+        <select id="f_category" style="background:var(--charcoal); color:var(--bone); padding:10px 12px; border:1px solid var(--hairline); border-radius:9px;"></select>
+      </div>
+      <div class="field">
+        <label>Tags (comma separated)</label>
+        <input id="f_tags" placeholder="e.g. urgent, family, 2026">
+      </div>
+      <div class="field">
+        <label>Attach file (PDF / JPG / PNG) or scan</label>
         <div style="display:flex; gap:10px; margin-bottom:12px;">
           <button type="button" class="btn" id="cameraBtn" style="flex:1;">📷 Take photo</button>
           <button type="button" class="btn" id="filesBtn" style="flex:1;">📁 Choose file</button>
@@ -139,33 +192,23 @@ if(window.pdfjsLib) {
         <div class="help-text">Files are encrypted (AES-256-GCM) in your browser before they touch storage or sync. Max 100MB — files over ~0.9MB (encrypted) stay local-only, since Firestore caps documents at 1MB, unless Google Drive is connected.</div>
         <div id="existingAttachment" style="display:none; margin-top:10px;"></div>
       </div>
-      <div class="field" id="reminderField">
+      <div class="field">
         <label>Expiry reminder</label>
-        <select id="f_reminder">
+        <select id="f_reminder" style="background:var(--charcoal); color:var(--bone); padding:10px 12px; border:1px solid var(--hairline); border-radius:9px;">
           <option value="">No reminder</option>
-          <option value="30">30 days before</option>
-          <option value="15">15 days before</option>
           <option value="7">7 days before</option>
-          <option value="1">1 day before</option>
+          <option value="30">30 days before</option>
+          <option value="90">90 days before</option>
         </select>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" data-close>Cancel</button>
-        <button class="btn btn-brass" id="saveDocBtn">Save to vault</button>
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="f_notes" placeholder="Optional description or notes" style="min-height:80px;"></textarea>
       </div>
     </div>
-  </div>
-</div>
-
-<!-- ============ MODAL: RE-AUTH TO REVEAL ============ -->
-<div class="overlay" id="authModal">
-  <div class="modal" style="max-width:340px">
-    <div class="modal-body" style="text-align:center; padding-top:26px;">
-      <div class="modal-title display" style="margin-bottom:6px;">Confirm it's you</div>
-      <div class="help-text" style="margin-bottom:18px;">Re-authenticate to reveal sensitive information.</div>
-      <div class="pin-dots" id="authPinDots" style="justify-content:center;"></div>
-      <div class="lock-error" id="authError"></div>
-      <div class="keypad" id="authKeypad" style="margin:16px auto 0;"></div>
+    <div class="modal-footer">
+      <button class="btn-ghost" data-close>Cancel</button>
+      <button class="btn btn-brass" id="docSaveBtn">💾 Save</button>
     </div>
   </div>
 </div>
@@ -183,72 +226,23 @@ if(window.pdfjsLib) {
   </div>
 </div>
 
-<!-- ============ MODAL: CATEGORY ============ -->
-<div class="overlay" id="catModal">
-  <div class="modal" style="max-width:360px">
-    <div class="modal-head"><div class="modal-title display">New category</div><button class="modal-close" data-close>&times;</button></div>
-    <div class="modal-body">
-      <div class="field"><label>Category name</label><input id="f_catname" placeholder="e.g. Subscriptions"></div>
-      <div class="modal-footer"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-brass" id="saveCatBtn">Create</button></div>
-    </div>
-  </div>
-</div>
-
-<!-- File menu -->
+<!-- File menu modal -->
 <div class="overlay" id="fileMenuModal">
-  <div class="modal" style="max-width:280px; position:fixed; right:20px; top:50px; left:auto;">
-    <div class="modal-body" style="padding:8px 0;">
-      <button class="btn-ghost" data-action="file-rename" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">✏️ Rename</button>
-      <button class="btn-ghost" data-action="file-move" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📁 Move to category</button>
-      <button class="btn-ghost" data-action="file-copy" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📋 Copy to category</button>
-      <button class="btn-ghost" data-action="file-download" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">⬇️ Download</button>
-      <hr style="margin:4px 0; border:none; border-top:1px solid var(--hairline);">
-      <button class="btn-ghost" data-action="file-delete" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0; color:var(--alert);">🗑️ Delete</button>
-      <button class="btn-ghost" data-close style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">Cancel</button>
-    </div>
+  <div class="modal" style="max-width:280px;">
+    <button class="btn-ghost" data-action="file-rename" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">✏️ Rename</button>
+    <button class="btn-ghost" data-action="file-move" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📁 Move to category</button>
+    <button class="btn-ghost" data-action="file-copy" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📋 Copy to category</button>
+    <button class="btn-ghost" data-action="file-download" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">⬇️ Download</button>
+    <hr style="margin:4px 0; border:none; border-top:1px solid var(--hairline);">
+    <button class="btn-ghost" data-action="file-delete" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0; color:var(--alert);">🗑️ Delete</button>
+    <button class="btn-ghost" data-close style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">Cancel</button>
   </div>
 </div>
 
-<!-- Rename modal -->
-<div class="overlay" id="renameModal">
-  <div class="modal" style="max-width:360px">
-    <div class="modal-head"><div class="modal-title display">Rename file</div><button class="modal-close" data-close>&times;</button></div>
-    <div class="modal-body">
-      <div class="field"><label>New name</label><input id="f_newname" placeholder="Enter new file name"></div>
-      <div class="modal-footer"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-brass" id="confirmRenameBtn">Rename</button></div>
-    </div>
-  </div>
-</div>
-
-<!-- Move/Copy modal -->
-<div class="overlay" id="moveModal">
-  <div class="modal" style="max-width:360px">
-    <div class="modal-head"><div class="modal-title display" id="moveModalTitle">Move to category</div><button class="modal-close" data-close>&times;</button></div>
-    <div class="modal-body">
-      <div class="field"><label>Select category</label>
-        <select id="f_targetCategory"></select>
-      </div>
-      <div class="modal-footer"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-brass" id="confirmMoveBtn">Move</button></div>
-    </div>
-  </div>
-</div>
-
-<!-- Delete confirmation modal -->
-<div class="overlay" id="deleteModal">
-  <div class="modal" style="max-width:360px">
-    <div class="modal-head"><div class="modal-title display">Delete file?</div><button class="modal-close" data-close>&times;</button></div>
-    <div class="modal-body">
-      <div class="help-text" style="margin-bottom:20px;">This action cannot be undone. The file will be permanently deleted from your vault.</div>
-      <div id="deleteFileName" style="font-weight:600; margin-bottom:16px; padding:12px; background:var(--bg-secondary); border-radius:8px;"></div>
-      <div class="modal-footer"><button class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-danger" id="confirmDeleteBtn">Delete permanently</button></div>
-    </div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
+<!-- Other modals (rename, move, delete) would go here -->
 
 <script src="firebase_config.js"></script>
-<script src="google_config.js"></script>
-<script src="script.js"></script>
+<script src="script_new.js"></script>
+
 </body>
 </html>
