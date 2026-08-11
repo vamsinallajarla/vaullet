@@ -2333,8 +2333,9 @@ if(sidebarOverlay){
 
 /* ===== KEYBOARD ===== */
 document.addEventListener('keydown', (e)=>{
-  const lockVisible = document.getElementById('lock').style.display !== 'none';
-  const authVisible = document.getElementById('authModal').classList.contains('active');
+  const lockVisible = document.getElementById('lock')?.style.display !== 'none';
+  const authModal = document.getElementById('authModal');
+  const authVisible = authModal ? authModal.classList.contains('active') : false;
   if(!lockVisible && !authVisible) return;
   if(e.key >= '0' && e.key <= '9'){
     e.preventDefault();
@@ -2499,18 +2500,28 @@ setTimeout(() => {
       e.preventDefault();
       try{
         loginBtn.disabled = true;
+        const origText = loginBtn.textContent;
         loginBtn.textContent = 'Signing in...';
         const email = (document.getElementById('loginEmail')?.value || '').trim();
         const password = document.getElementById('loginPassword')?.value || '';
+        
+        console.log('🔐 [LOGIN] Attempting login:', email);
+        
         if(!email || !password) throw new Error('Please enter email and password');
+        if(!Cloud.auth) throw new Error('Firebase Auth not ready');
+        
+        console.log('🔐 [LOGIN] Calling loginWithEmail');
         await Cloud.loginWithEmail(email, password);
+        
+        console.log('✅ [LOGIN] Login successful');
         document.getElementById('loginEmail').value = '';
         document.getElementById('loginPassword').value = '';
         document.getElementById('loginError').textContent = '';
       }catch(err){
-        document.getElementById('loginError').textContent = err.message;
+        console.error('❌ [LOGIN] Error:', err.message, err.code);
+        document.getElementById('loginError').textContent = err.message || 'Login failed';
         loginBtn.disabled = false;
-        loginBtn.textContent = 'Login';
+        loginBtn.textContent = origText || 'Login';
       }
     };
     console.log('✅ Login button wired');
@@ -2521,24 +2532,35 @@ setTimeout(() => {
       e.preventDefault();
       try{
         registerBtn.disabled = true;
+        const origText = registerBtn.textContent;
         registerBtn.textContent = 'Creating account...';
         const email = (document.getElementById('registerEmail')?.value || '').trim();
         const password = document.getElementById('registerPassword')?.value || '';
         const confirm = document.getElementById('registerConfirm')?.value || '';
+        
+        console.log('📝 [REGISTER] Attempting registration:', email);
+        
         if(!email || !password || !confirm) throw new Error('Please fill all fields');
         if(password !== confirm) throw new Error('Passwords do not match');
+        if(!Cloud.auth) throw new Error('Firebase Auth not ready');
+        
+        console.log('📝 [REGISTER] Calling registerWithEmail');
         await Cloud.registerWithEmail(email, password);
+        
+        console.log('✅ [REGISTER] Registration successful');
         document.getElementById('registerEmail').value = '';
         document.getElementById('registerPassword').value = '';
         document.getElementById('registerConfirm').value = '';
         document.getElementById('registerError').textContent = '';
         document.getElementById('registerForm').style.display = 'none';
         document.getElementById('loginForm').style.display = 'block';
+        document.getElementById('loginEmail').value = email;
         toast('Account created! Please log in.');
       }catch(err){
-        document.getElementById('registerError').textContent = err.message;
+        console.error('❌ [REGISTER] Error:', err.message, err.code);
+        document.getElementById('registerError').textContent = err.message || 'Registration failed';
         registerBtn.disabled = false;
-        registerBtn.textContent = 'Create Account';
+        registerBtn.textContent = origText || 'Create Account';
       }
     };
     console.log('✅ Register button wired');
