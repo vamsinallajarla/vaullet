@@ -411,7 +411,16 @@ function escapeHtml(text){
 }
 
 /* ===== BOOT ===== */
-(async function boot(){
+function startBoot(){
+  if(!window.firebase){
+    console.log('⏳ [BOOT] Waiting for Firebase SDK...');
+    setTimeout(startBoot, 100);
+    return;
+  }
+  
+  console.log('✅ [BOOT] Firebase SDK loaded, starting boot');
+  
+  (async function boot(){
   loadTheme();
   
   try{
@@ -456,7 +465,11 @@ function escapeHtml(text){
   });
   
   console.log('✅ [BOOT] Boot complete');
-})();
+  })();
+}
+
+// Start boot after a tiny delay to let Firebase load
+setTimeout(startBoot, 100);
 
 /* ===== AUTH BUTTON WIRING ===== */
 function wireAuthButtons(){
