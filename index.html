@@ -733,18 +733,17 @@ a{ color:var(--brass); }
 
 <script type="module">
 /* ==========================================================
-   CONFIGURE THESE — replace with your own Firebase project
-   and Google OAuth client before deploying.
+   CONFIG — credentials live in two sibling files instead of
+   inline here, so this file has no secrets to accidentally
+   commit or share:
+     ./firebase_config.js   ->  export const firebaseConfig = {...}
+     ./google_config.js     ->  export const GOOGLE_CLIENT_ID = "..."
+   Both must sit next to this HTML file (same folder) when
+   deployed, since they're loaded as relative ES module imports.
    ========================================================== */
-const firebaseConfig = {
-  apiKey: "YOUR_FIREBASE_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-const GOOGLE_CLIENT_ID = "YOUR_CLIENT_ID.apps.googleusercontent.com"; // used only for Drive access, not sign-in
+import { firebaseConfig } from "./firebase_config.js";
+import { GOOGLE_CLIENT_ID } from "./google_config.js";
+
 const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file";
 const ALLOWED_EMAIL_DOMAIN = "vaullet.in"; // sign-in restricted to user@vaullet.in
 const ROOT_FOLDER_NAME_DEFAULT = "Vaullet";
