@@ -1982,66 +1982,69 @@ function viewDocument(id){
   document.getElementById('docModal').classList.add('active');
 }
 
-document.getElementById('saveDocBtn').onclick = async ()=>{
+const el_saveDocBtn = document.getElementById('saveDocBtn');
+if(el_saveDocBtn){
+  el_saveDocBtn.onclick = async ()=>{
   const btn = document.getElementById('saveDocBtn');
   const originalLabel = btn.textContent;
   btn.disabled = true; btn.textContent = 'Saving…';
   try{
-    if(!State.masterKey) throw new Error('Vault key missing — please reload and unlock again.');
-    const fileInput = document.getElementById('f_file');
-    let attachment = null;
-    if(fileInput.files[0]){
-      const file = fileInput.files[0];
-      if(file.size > 100 * 1024 * 1024) throw new Error(`"${file.name}" is ${(file.size/1024/1024).toFixed(1)}MB — please attach files under 100MB.`);
-      const driveReady = window.VAULLET_GOOGLE_CONFIG && window.VAULLET_GOOGLE_CONFIG.clientId && await Drive.ensureReady();
-      if(driveReady){
-        // Upload raw file to Drive (NO encryption)
-        btn.textContent = 'Uploading to Drive…';
-        const rawBytes = await file.arrayBuffer();
-        const driveFileId = await Drive.uploadRaw(rawBytes, file.name);
-        attachment = {storage:'drive', driveFileId, name:file.name, type:file.type, size:file.size};
-        console.log('✅ [UPLOAD] File uploaded to Drive unencrypted');
-        btn.textContent = 'Saving…';
-      } else {
-        attachment = await fileToBase64(file);
-        attachment.storage = 'inline';
-      }
-    }
-    const doc = {
-      id: editingId,
-      name: document.getElementById('f_name').value.trim() || 'Untitled',
-      category: document.getElementById('f_category').value,
-      type: document.getElementById('f_type').value,
-      number: document.getElementById('f_number').value.trim(),
-      issue: document.getElementById('f_issue').value,
-      expiry: document.getElementById('f_expiry').value,
-      tags: document.getElementById('f_tags').value.split(',').map(t=>t.trim()).filter(Boolean),
-      notes: document.getElementById('f_notes').value.trim(),
-      reminder: document.getElementById('f_reminder').value,
-      attachment: attachment,
-      favorite: editingId ? (State.documents.find(x=>x.id===editingId)||{}).favorite : false,
-    };
-    const pushResult = await saveDocument(doc);
-    closeModals();
-    render();
-    if(pushResult && pushResult.reason === 'too-large'){
-      toast(`Saved locally (${pushResult.sizeMB}MB). Too large for Firestore's 1MB document limit — not synced to cloud.`);
-    } else if(pushResult && pushResult.reason === 'error'){
-      toast('Saved locally. Firestore sync failed: ' + pushResult.message);
-    } else {
-      toast('Saved to Google Drive (unencrypted).');
-    }
-  }catch(e){
-    console.error('Save to vault failed:', e);
-    let errorMsg = e.message || 'unknown error';
-    if(errorMsg.includes('HTTP 401') || errorMsg.includes('HTTP 403') || errorMsg.includes('token')){
-      errorMsg = 'Google Drive access expired. Please sign out and sign in again.';
-    }
-    toast('Could not save: ' + errorMsg);
-  }finally{
-    btn.disabled = false; btn.textContent = originalLabel;
+  if(!State.masterKey) throw new Error('Vault key missing — please reload and unlock again.');
+  const fileInput = document.getElementById('f_file');
+  let attachment = null;
+  if(fileInput.files[0]){
+  const file = fileInput.files[0];
+  if(file.size > 100 * 1024 * 1024) throw new Error(`"${file.name}" is ${(file.size/1024/1024).toFixed(1)}MB — please attach files under 100MB.`);
+  const driveReady = window.VAULLET_GOOGLE_CONFIG && window.VAULLET_GOOGLE_CONFIG.clientId && await Drive.ensureReady();
+  if(driveReady){
+  // Upload raw file to Drive (NO encryption)
+  btn.textContent = 'Uploading to Drive…';
+  const rawBytes = await file.arrayBuffer();
+  const driveFileId = await Drive.uploadRaw(rawBytes, file.name);
+  attachment = {storage:'drive', driveFileId, name:file.name, type:file.type, size:file.size};
+  console.log('✅ [UPLOAD] File uploaded to Drive unencrypted');
+  btn.textContent = 'Saving…';
+  } else {
+  attachment = await fileToBase64(file);
+  attachment.storage = 'inline';
   }
-};
+  }
+  const doc = {
+  id: editingId,
+  name: document.getElementById('f_name').value.trim() || 'Untitled',
+  category: document.getElementById('f_category').value,
+  type: document.getElementById('f_type').value,
+  number: document.getElementById('f_number').value.trim(),
+  issue: document.getElementById('f_issue').value,
+  expiry: document.getElementById('f_expiry').value,
+  tags: document.getElementById('f_tags').value.split(',').map(t=>t.trim()).filter(Boolean),
+  notes: document.getElementById('f_notes').value.trim(),
+  reminder: document.getElementById('f_reminder').value,
+  attachment: attachment,
+  favorite: editingId ? (State.documents.find(x=>x.id===editingId)||{}).favorite : false,
+  };
+  const pushResult = await saveDocument(doc);
+  closeModals();
+  render();
+  if(pushResult && pushResult.reason === 'too-large'){
+  toast(`Saved locally (${pushResult.sizeMB}MB). Too large for Firestore's 1MB document limit — not synced to cloud.`);
+  } else if(pushResult && pushResult.reason === 'error'){
+  toast('Saved locally. Firestore sync failed: ' + pushResult.message);
+  } else {
+  toast('Saved to Google Drive (unencrypted).');
+  }
+  }catch(e){
+  console.error('Save to vault failed:', e);
+  let errorMsg = e.message || 'unknown error';
+  if(errorMsg.includes('HTTP 401') || errorMsg.includes('HTTP 403') || errorMsg.includes('token')){
+  errorMsg = 'Google Drive access expired. Please sign out and sign in again.';
+  }
+  toast('Could not save: ' + errorMsg);
+  }finally{
+  btn.disabled = false; btn.textContent = originalLabel;
+  }
+  };
+}
 
 function fileToBase64(file){
   return new Promise((res,rej)=>{
@@ -2053,7 +2056,9 @@ function fileToBase64(file){
 }
 
 /* ===== CATEGORY MODAL ===== */
-document.getElementById('saveCatBtn').onclick = async ()=>{
+const el_saveCatBtn = document.getElementById('saveCatBtn');
+if(el_saveCatBtn){
+  el_saveCatBtn.onclick = async ()=>{
   const name = document.getElementById('f_catname').value.trim();
   if(!name) return;
   if(!State.categories.includes(name)) State.categories.push(name);
@@ -2062,7 +2067,8 @@ document.getElementById('saveCatBtn').onclick = async ()=>{
   closeModals();
   render();
   toast('Category created');
-};
+  };
+}
 
 /* ===== REVEAL ===== */
 let authPin='';
@@ -2341,8 +2347,14 @@ document.addEventListener('keydown', (e)=>{
 });
 
 /* ===== SHELL ===== */
-document.getElementById('lockNow').onclick = lockVault;
-document.getElementById('themeToggle').onclick = ()=>setTheme(State.theme==='dark'?'light':'dark');
+const el_lockNow = document.getElementById('lockNow');
+if(el_lockNow){
+  el_lockNow.onclick = lockVault;
+}
+const el_themeToggle = document.getElementById('themeToggle');
+if(el_themeToggle){
+  el_themeToggle.onclick = ()=>setTheme(State.theme==='dark'?'light':'dark');
+}
 
 /* ===== AUTO-LOCK ===== */
 let inactivityTimer;
@@ -2542,4 +2554,4 @@ setTimeout(() => {
   }
   
   console.log('✅ [AUTH WIRE] All auth buttons wired successfully');
-}, 600);
+}, 1000);
