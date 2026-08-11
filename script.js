@@ -257,14 +257,17 @@ function buildKeypad(container, onDigit, onBack){
   const buttons = [1,2,3,4,5,6,7,8,9,'','0','⌫'];
   container.innerHTML = buttons.map(b => 
     b === '' ? '<div></div>' : 
-    `<button style="padding:16px; font-size:18px; border:1px solid var(--hairline); border-radius:8px; background:var(--graphite); color:var(--bone); cursor:pointer; font-weight:600;">${b}</button>`
+    `<button style="padding:16px; font-size:18px; border:1px solid var(--hairline); border-radius:8px; background:var(--graphite); color:var(--bone); cursor:pointer; font-weight:600; transition:all 200ms;" onmouseover="this.style.background='var(--brass)'" onmouseout="this.style.background='var(--graphite)'">${b}</button>`
   ).join('');
   
   const btns = container.querySelectorAll('button');
   btns.forEach((btn, i) => {
     const val = buttons[i];
-    if(val === '⌫') btn.onclick = onBack;
-    else if(val !== '') btn.onclick = () => onDigit(val);
+    if(val === '⌫'){
+      btn.onclick = (e) => { e.preventDefault(); onBack(); };
+    } else if(val !== ''){
+      btn.onclick = (e) => { e.preventDefault(); onDigit(val); };
+    }
   });
 }
 
@@ -550,4 +553,222 @@ if(document.readyState === 'loading'){
   document.addEventListener('DOMContentLoaded', () => setTimeout(wireAuthButtons, 500));
 } else {
   setTimeout(wireAuthButtons, 500);
+}
+
+
+/* ===== DOCUMENT MANAGEMENT ===== */
+async function saveDocument(){
+  const name = document.getElementById('f_name')?.value || '';
+  const category = document.getElementById('f_category')?.value || 'Personal';
+  const type = document.getElementById('f_type')?.value || 'document';
+  
+  if(!name.trim()) return toast('Please enter a name');
+  
+  const id = Date.now().toString();
+  const doc = {
+    id, name: name.trim(), category, type,
+    number: document.getElementById('f_number')?.value || '',
+    expiry: document.getElementById('f_expiry')?.value || '',
+    cvv: document.getElementById('f_cvv')?.value || '',
+    tags: (document.getElementById('f_tags')?.value || '').split(',').map(t => t.trim()).filter(t => t),
+    notes: document.getElementById('f_notes')?.value || '',
+    createdAt: new Date().toISOString(),
+    favorite: false
+  };
+  
+  State.documents.push(doc);
+  
+  // Encrypt and save
+  try{
+    const json = JSON.stringify(doc);
+    const {iv, ct} = await Crypto.encryptStr(State.masterKey, json);
+    const encrypted = {id, iv, ct};
+    
+    await LocalDB.putItem(encrypted);
+    await Cloud.push(encrypted);
+    
+    toast('Document saved!');
+    closeModal('docModal');
+    renderApp();
+  }catch(e){
+    toast('Error: ' + e.message);
+  }
+}
+
+async function deleteDocument(id){
+  State.documents = State.documents.filter(d => d.id !== id);
+  await LocalDB.deleteItem(id);
+  await Cloud.remove(id);
+  toast('Deleted');
+  renderApp();
+}
+
+function closeModal(id){
+  const modal = document.getElementById(id);
+  if(modal) modal.classList.remove('active');
+}
+
+/* ===== ENHANCED APP RENDERING ===== */
+function renderApp(){
+  const content = document.getElementById('content');
+  const rail = document.getElementById('rail');
+  
+  // Rail
+  rail.innerHTML = `
+    <div style="padding:16px; border-bottom:1px solid var(--hairline);">
+      <div class="display" style="font-size:16px;">Vaullet</div>
+      <div style="font-size:11px; color:var(--steel);">Vault</div>
+    </div>
+    <button data-tab="home" class="rail-item ${State.activeTab === 'home' ? 'active' : ''}">🏠 Home</button>
+    <button data-tab="documents" class="rail-item ${State.activeTab === 'documents' ? 'active' : ''}">📄 Documents</button>
+    <button data-tab="cards" class="rail-item ${State.activeTab === 'cards' ? 'active' : ''}">💳 Cards</button>
+    <button data-tab="all" class="rail-item ${State.activeTab === 'all' ? 'active' : ''}">📂 All Items</button>
+  `;
+  
+  rail.querySelectorAll('[data-tab]').forEach(btn => {
+    btn.onclick = () => { State.activeTab = btn.dataset.tab; renderApp(); };
+  });
+  
+  // Content
+  let html = '';
+  
+  if(State.activeTab === 'home'){
+    html = `
+      <div style="padding:24px;">
+        <h2 class="display">Welcome</h2>
+        <p style="color:var(--steel); margin:16px 0;">You have ${State.documents.length} item${State.documents.length !== 1 ? 's' : ''}</p>
+        <button class="btn btn-brass" id="newDocBtn">+ New Document</button>
+      </div>
+    `;
+  } else if(State.activeTab === 'documents'){
+    const docs = State.documents.filter(d => d.type === 'document');
+    html = `
+      <div style="padding:24px;">
+        <h2 class="display">Documents</h2>
+        <button class="btn btn-brass" id="newDocBtn" style="margin-bottom:20px;">+ New Document</button>
+        <div style="display:grid; gap:12px;">
+          ${docs.map(d => `
+            <div style="border:1px solid var(--hairline); border-radius:8px; padding:16px; background:var(--graphite);">
+              <div style="font-weight:600;">${escapeHtml(d.name)}</div>
+              <div style="font-size:12px; color:var(--steel);">${d.category}</div>
+              <div style="margin-top:12px; display:flex; gap:8px;">
+                <button data-doc="${d.id}" class="edit-doc" style="flex:1; padding:8px; border:1px solid var(--hairline); border-radius:4px; background:var(--charcoal); color:var(--bone); cursor:pointer;">Edit</button>
+                <button data-doc="${d.id}" class="delete-doc" style="flex:1; padding:8px; border:1px solid var(--alert); border-radius:4px; background:transparent; color:var(--alert); cursor:pointer;">Delete</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  } else if(State.activeTab === 'cards'){
+    const cards = State.documents.filter(d => d.type === 'card');
+    html = `
+      <div style="padding:24px;">
+        <h2 class="display">Cards</h2>
+        <button class="btn btn-brass" id="newCardBtn" style="margin-bottom:20px;">+ New Card</button>
+        <div style="display:grid; gap:12px;">
+          ${cards.map(c => `
+            <div style="border:1px solid var(--hairline); border-radius:8px; padding:16px; background:var(--graphite);">
+              <div style="font-weight:600;">${escapeHtml(c.name)}</div>
+              <div style="font-size:12px; color:var(--steel);">${c.category}</div>
+              <div style="margin-top:8px; font-family:monospace; letter-spacing:2px;">
+                ${c.number ? c.number.slice(-4).padStart(c.number.length, '*') : 'No number'}
+              </div>
+              <div style="margin-top:12px; display:flex; gap:8px;">
+                <button data-card="${c.id}" class="edit-card" style="flex:1; padding:8px; border:1px solid var(--hairline); border-radius:4px; background:var(--charcoal); color:var(--bone); cursor:pointer;">Edit</button>
+                <button data-card="${c.id}" class="delete-card" style="flex:1; padding:8px; border:1px solid var(--alert); border-radius:4px; background:transparent; color:var(--alert); cursor:pointer;">Delete</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  } else {
+    html = `
+      <div style="padding:24px;">
+        <h2 class="display">All Items</h2>
+        <button class="btn btn-brass" id="newDocBtn" style="margin-bottom:20px;">+ New Item</button>
+        <div style="display:grid; gap:12px;">
+          ${State.documents.map(d => `
+            <div style="border:1px solid var(--hairline); border-radius:8px; padding:16px; background:var(--graphite);">
+              <div style="font-weight:600;">${escapeHtml(d.name)}</div>
+              <div style="font-size:12px; color:var(--steel);">${d.category} • ${d.type}</div>
+              <div style="margin-top:12px; display:flex; gap:8px;">
+                <button data-id="${d.id}" class="edit-item" style="flex:1; padding:8px; border:1px solid var(--hairline); border-radius:4px; background:var(--charcoal); color:var(--bone); cursor:pointer;">Edit</button>
+                <button data-id="${d.id}" class="delete-item" style="flex:1; padding:8px; border:1px solid var(--alert); border-radius:4px; background:transparent; color:var(--alert); cursor:pointer;">Delete</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+  
+  content.innerHTML = html;
+  
+  // Wire buttons
+  document.getElementById('newDocBtn')?.addEventListener('click', () => openDocModal('document'));
+  document.getElementById('newCardBtn')?.addEventListener('click', () => openDocModal('card'));
+  
+  document.querySelectorAll('[class*="delete-"]').forEach(btn => {
+    btn.onclick = (e) => {
+      const id = e.target.dataset.doc || e.target.dataset.card || e.target.dataset.id;
+      if(confirm('Delete this item?')) deleteDocument(id);
+    };
+  });
+}
+
+function openDocModal(type = 'document'){
+  const modal = document.getElementById('docModal');
+  document.getElementById('f_name').value = '';
+  document.getElementById('f_category').value = 'Personal';
+  document.getElementById('f_type').value = type;
+  
+  const cardFields = document.getElementById('cardFields');
+  const cardCVV = document.getElementById('cardCVVField');
+  
+  if(type === 'card'){
+    cardFields.style.display = 'block';
+    cardCVV.style.display = 'block';
+  } else {
+    cardFields.style.display = 'none';
+    cardCVV.style.display = 'none';
+  }
+  
+  modal.classList.add('active');
+}
+
+
+// Wire modal buttons
+setTimeout(() => {
+  const docSaveBtn = document.getElementById('docSaveBtn');
+  if(docSaveBtn) docSaveBtn.onclick = saveDocument;
+  
+  document.querySelectorAll('[data-close]').forEach(btn => {
+    btn.onclick = (e) => {
+      const modal = e.target.closest('.overlay');
+      if(modal) modal.classList.remove('active');
+    };
+  });
+}, 500);
+
+
+// Fix lock button and theme toggle
+setTimeout(() => {
+  const lockBtn = document.getElementById('lockNow');
+  const themeBtn = document.getElementById('themeToggle');
+  const hamburgerBtn = document.getElementById('hamburgerBtn');
+  
+  if(lockBtn) lockBtn.onclick = lockVault;
+  if(themeBtn) themeBtn.onclick = () => setTheme(State.theme === 'dark' ? 'light' : 'dark');
+  if(hamburgerBtn) hamburgerBtn.onclick = toggleMobileMenu;
+  
+  console.log('✅ [FIX] Buttons wired');
+}, 600);
+
+function toggleMobileMenu(){
+  const sidebar = document.getElementById('mobileSidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  if(sidebar) sidebar.classList.toggle('active');
+  if(overlay) overlay.classList.toggle('active');
 }
