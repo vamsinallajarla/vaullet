@@ -9,11 +9,9 @@
 </head>
 <body>
 
-<!-- Login/Register Screen -->
+<!-- AUTH SCREEN (Login/Register) -->
 <div id="authScreen" style="position:fixed; inset:0; background:radial-gradient(circle at 50% 30%, var(--charcoal), var(--ink) 70%); display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px;">
   <div style="width:100%; max-width:420px;">
-    
-    <!-- Logo -->
     <div style="text-align:center; margin-bottom:40px;">
       <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" style="width:100px; height:100px; margin:0 auto;">
         <circle cx="100" cy="100" r="95" fill="none" stroke="var(--brass)" stroke-width="2" opacity="0.3"/>
@@ -25,14 +23,12 @@
         </g>
       </svg>
     </div>
-    
-    <!-- Title -->
     <div style="text-align:center; margin-bottom:40px;">
       <div class="display" style="font-size:28px; font-weight:600; margin-bottom:8px;">Vaullet</div>
       <div style="color:var(--steel); font-size:13px;">Secure Document & Card Vault</div>
     </div>
     
-    <!-- Login Form -->
+    <!-- LOGIN FORM -->
     <div id="loginForm" style="background:var(--charcoal); border:1px solid var(--hairline); border-radius:16px; padding:32px 24px;">
       <div class="field">
         <label>Email</label>
@@ -41,22 +37,18 @@
           <div style="padding:10px 12px; background:var(--graphite); border:1px solid var(--hairline); border-left:none; border-radius:0 9px 9px 0; color:var(--steel); font-size:13px; white-space:nowrap;">@vaullet.in</div>
         </div>
       </div>
-      
       <div class="field">
         <label>Password</label>
         <input id="loginPassword" type="password" placeholder="Enter password">
       </div>
-      
       <div id="loginError" style="color:var(--alert); font-size:12px; margin-bottom:16px; min-height:16px; text-align:center;"></div>
-      
       <button class="btn btn-brass" id="loginBtn" style="width:100%; margin-bottom:16px;">Login</button>
-      
       <div style="text-align:center; color:var(--steel); font-size:12px;">
         Don't have an account? <button id="switchToRegister" class="btn-ghost" style="padding:0; border:none; color:var(--brass); font-weight:600; cursor:pointer;">Register</button>
       </div>
     </div>
     
-    <!-- Register Form (hidden) -->
+    <!-- REGISTER FORM (hidden) -->
     <div id="registerForm" style="display:none; background:var(--charcoal); border:1px solid var(--hairline); border-radius:16px; padding:32px 24px;">
       <div class="field">
         <label>Email</label>
@@ -65,33 +57,27 @@
           <div style="padding:10px 12px; background:var(--graphite); border:1px solid var(--hairline); border-left:none; border-radius:0 9px 9px 0; color:var(--steel); font-size:13px; white-space:nowrap;">@vaullet.in</div>
         </div>
       </div>
-      
       <div class="field">
         <label>Password</label>
         <input id="registerPassword" type="password" placeholder="Create password (min 8 chars)">
       </div>
-      
       <div class="field">
         <label>Confirm Password</label>
         <input id="registerConfirm" type="password" placeholder="Confirm password">
       </div>
-      
       <div id="registerError" style="color:var(--alert); font-size:12px; margin-bottom:16px; min-height:16px; text-align:center;"></div>
-      
       <button class="btn btn-brass" id="registerBtn" style="width:100%; margin-bottom:16px;">Create Account</button>
-      
       <div style="text-align:center; color:var(--steel); font-size:12px;">
         Already have an account? <button id="switchToLogin" class="btn-ghost" style="padding:0; border:none; color:var(--brass); font-weight:600; cursor:pointer;">Login</button>
       </div>
     </div>
-    
   </div>
 </div>
 
-<!-- PIN Entry Screen -->
+<!-- PIN ENTRY SCREEN -->
 <div id="lock" style="display:none;"></div>
 
-<!-- Main App -->
+<!-- MAIN APP -->
 <div id="app">
   <aside class="rail" id="rail"></aside>
   <main>
@@ -118,7 +104,7 @@
   </main>
 </div>
 
-<!-- Mobile Sidebar Navigation -->
+<!-- Mobile Sidebar -->
 <div class="mobile-sidebar-overlay" id="sidebarOverlay"></div>
 <nav class="mobile-sidebar" id="mobileSidebar">
   <button class="sidebar-close" id="sidebarClose">
@@ -129,10 +115,10 @@
   <div id="mobileSidebarNav"></div>
 </nav>
 
-<!-- Bottom Mobile Navigation -->
+<!-- Mobile Bottom Nav -->
 <nav class="mobile-nav" id="mobileNav"></nav>
 
-<!-- Modals start here -->
+<!-- MODALS -->
 <div class="overlay" id="docModal">
   <div class="modal">
     <div class="modal-head">
@@ -142,7 +128,7 @@
     <div class="modal-body">
       <div class="field">
         <label>Name</label>
-        <input id="f_name" placeholder="e.g. Passport, Tax Return">
+        <input id="f_name" placeholder="e.g. Passport">
       </div>
       <div class="field" id="cardFields" style="display:none;">
         <label>Card number</label>
@@ -162,26 +148,16 @@
           <input id="f_expiry" placeholder="12/25" maxlength="5">
         </div>
       </div>
-      <div class="field-row" id="dateRangeFields" style="display:none;">
-        <div class="field">
-          <label>From</label>
-          <input id="f_dateFrom" type="date" placeholder="dd-mm-yyyy">
-        </div>
-        <div class="field">
-          <label>To</label>
-          <input id="f_dateTo" type="date" placeholder="dd-mm-yyyy">
-        </div>
-      </div>
       <div class="field">
         <label>Category</label>
-        <select id="f_category" style="background:var(--charcoal); color:var(--bone); padding:10px 12px; border:1px solid var(--hairline); border-radius:9px;"></select>
+        <select id="f_category"></select>
       </div>
       <div class="field">
         <label>Tags (comma separated)</label>
-        <input id="f_tags" placeholder="e.g. urgent, family, 2026">
+        <input id="f_tags" placeholder="e.g. urgent, family">
       </div>
       <div class="field">
-        <label>Attach file (PDF / JPG / PNG) or scan</label>
+        <label>Attach file</label>
         <div style="display:flex; gap:10px; margin-bottom:12px;">
           <button type="button" class="btn" id="cameraBtn" style="flex:1;">📷 Take photo</button>
           <button type="button" class="btn" id="filesBtn" style="flex:1;">📁 Choose file</button>
@@ -189,12 +165,12 @@
         <input id="f_file" type="file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;">
         <input id="f_camera" type="file" accept="image/*" capture="environment" style="display:none;">
         <div id="fileSelected" style="padding:8px 12px; background:var(--graphite); border-radius:8px; color:var(--bone-dim); font-size:12px; display:none; margin-bottom:12px;"></div>
-        <div class="help-text">Files are encrypted (AES-256-GCM) in your browser before they touch storage or sync. Max 100MB — files over ~0.9MB (encrypted) stay local-only, since Firestore caps documents at 1MB, unless Google Drive is connected.</div>
+        <div class="help-text">Files encrypted before sync. Max 100MB.</div>
         <div id="existingAttachment" style="display:none; margin-top:10px;"></div>
       </div>
       <div class="field">
         <label>Expiry reminder</label>
-        <select id="f_reminder" style="background:var(--charcoal); color:var(--bone); padding:10px 12px; border:1px solid var(--hairline); border-radius:9px;">
+        <select id="f_reminder">
           <option value="">No reminder</option>
           <option value="7">7 days before</option>
           <option value="30">30 days before</option>
@@ -203,7 +179,7 @@
       </div>
       <div class="field">
         <label>Notes</label>
-        <textarea id="f_notes" placeholder="Optional description or notes" style="min-height:80px;"></textarea>
+        <textarea id="f_notes" placeholder="Optional notes" style="min-height:80px;"></textarea>
       </div>
     </div>
     <div class="modal-footer">
@@ -213,7 +189,7 @@
   </div>
 </div>
 
-<!-- File preview modal -->
+<!-- Preview Modal -->
 <div class="overlay" id="previewModal">
   <div class="modal" style="position:fixed; top:0; left:0; right:0; bottom:0; width:100vw; height:100vh; max-width:none; max-height:none; margin:0; padding:0; border-radius:0; display:flex; flex-direction:column;">
     <div class="modal-head" style="flex-shrink:0;">
@@ -226,12 +202,12 @@
   </div>
 </div>
 
-<!-- File menu modal -->
+<!-- File Menu Modal -->
 <div class="overlay" id="fileMenuModal">
   <div class="modal" style="max-width:280px;">
     <button class="btn-ghost" data-action="file-rename" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">✏️ Rename</button>
-    <button class="btn-ghost" data-action="file-move" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📁 Move to category</button>
-    <button class="btn-ghost" data-action="file-copy" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📋 Copy to category</button>
+    <button class="btn-ghost" data-action="file-move" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📁 Move</button>
+    <button class="btn-ghost" data-action="file-copy" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">📋 Copy</button>
     <button class="btn-ghost" data-action="file-download" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0;">⬇️ Download</button>
     <hr style="margin:4px 0; border:none; border-top:1px solid var(--hairline);">
     <button class="btn-ghost" data-action="file-delete" style="width:100%; text-align:left; padding:12px 16px; border:none; cursor:pointer; border-radius:0; color:var(--alert);">🗑️ Delete</button>
@@ -239,9 +215,12 @@
   </div>
 </div>
 
-<!-- Other modals (rename, move, delete) would go here -->
+<!-- Toast -->
+<div class="toast" id="toast"></div>
 
+<!-- Scripts -->
 <script src="firebase_config.js"></script>
+<script src="google_config.js"></script>
 <script src="script.js"></script>
 
 </body>
