@@ -417,3 +417,71 @@ input:checked + .slider::before{transform:translateX(18px); background:var(--ink
 }
 
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+
+/* Mobile Sidebar */
+.mobile-sidebar {
+  position: fixed;
+  left: -280px;
+  top: 0;
+  width: 280px;
+  height: 100vh;
+  background: var(--charcoal);
+  border-right: 1px solid var(--hairline);
+  z-index: 1999;
+  transition: left 300ms;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.mobile-sidebar.active {
+  left: 0;
+}
+
+.mobile-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 1998;
+  display: none;
+}
+
+.mobile-sidebar-overlay.active {
+  display: block;
+}
+
+.sidebar-close {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  background: transparent;
+  color: var(--bone);
+  font-size: 24px;
+  cursor: pointer;
+  text-align: right;
+}
+
+#mobileSidebarNav button {
+  width: 100%;
+  padding: 12px;
+  margin: 8px 0;
+  border: none;
+  border-radius: 6px;
+  background: var(--graphite);
+  color: var(--bone);
+  cursor: pointer;
+  text-align: left;
+}
+
+#mobileSidebarNav button:hover {
+  background: var(--brass);
+}
+
+@media (max-width: 768px) {
+  .hamburger {
+    display: flex !important;
+  }
+  
+  .rail {
+    display: none;
+  }
+}
