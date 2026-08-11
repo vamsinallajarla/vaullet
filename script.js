@@ -143,22 +143,14 @@ const Cloud = {
   loginWithEmail(email, password){
     if(!this.auth) throw new Error("Firebase Auth not initialized");
     const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
-    if(!fullEmail.endsWith('@vaullet.in')){
-      throw new Error('Email must be @vaullet.in domain');
-    }
-    console.log('🔐 [AUTH] Logging in:', fullEmail);
+    if(!fullEmail.endsWith('@vaullet.in')) throw new Error('Email must be @vaullet.in domain');
     return this.auth.signInWithEmailAndPassword(fullEmail, password);
   },
   registerWithEmail(email, password){
     if(!this.auth) throw new Error("Firebase Auth not initialized");
     const fullEmail = email.includes('@') ? email : email + '@vaullet.in';
-    if(!fullEmail.endsWith('@vaullet.in')){
-      throw new Error('Email must be @vaullet.in domain');
-    }
-    if(password.length < 8){
-      throw new Error('Password must be at least 8 characters');
-    }
-    console.log('📝 [AUTH] Registering:', fullEmail);
+    if(!fullEmail.endsWith('@vaullet.in')) throw new Error('Email must be @vaullet.in domain');
+    if(password.length < 8) throw new Error('Password must be at least 8 characters');
     return this.auth.createUserWithEmailAndPassword(fullEmail, password);
   },
   signOut(){
@@ -2381,22 +2373,13 @@ function resetInactivity(){
       State.googleUser = user;
       console.log('✅ [LOGIN SUCCESS] User authenticated:', user.email);
       
-      // Request Google Drive access for file storage (separate from Firebase Auth)
+      // Cache Google Drive token for file preview (so we don't need auth every time)
       try{
-        console.log('🔑 [DRIVE] Requesting Google Drive access...');
-        const tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: window.VAULLET_GOOGLE_CONFIG?.clientId,
-          scope: 'https://www.googleapis.com/auth/drive',
-          callback: (response) => {
-            if(response.access_token){
-              localStorage.setItem('vaullet_google_access_token', response.access_token);
-              console.log('✅ [DRIVE] Google Drive access granted');
-            }
-          }
-        });
-        tokenClient.requestAccessToken();
+        const token = await user.getIdToken();
+        localStorage.setItem('vaullet_drive_token', token);
+        console.log('✅ [DRIVE] Access token cached for file previews');
       }catch(e){
-        console.warn('⚠️ [DRIVE] Could not initialize Drive access:', e.message);
+        console.warn('⚠️ [DRIVE] Could not cache Drive token:', e.message);
       }
       
       document.getElementById('lock').style.display='flex';
@@ -2405,99 +2388,88 @@ function resetInactivity(){
       resetInactivity();
     } else {
       console.log('⚠️ [NO USER] Showing login screen');
-      // Show auth screen (login/register forms are in index_new.html)
       document.getElementById('authScreen').style.display = 'flex';
       document.getElementById('lock').style.display = 'none';
       document.getElementById('app').classList.remove('active');
-      
-      // Wire up authentication buttons (they exist in authScreen, not lock)
-      const loginBtn = document.getElementById('loginBtn');
-      const registerBtn = document.getElementById('registerBtn');
-      const switchToRegister = document.getElementById('switchToRegister');
-      const switchToLogin = document.getElementById('switchToLogin');
-      
-      if(loginBtn){
-        loginBtn.onclick = async ()=>{
-          try{
-            loginBtn.disabled = true;
-            loginBtn.textContent = 'Signing in...';
-            const email = document.getElementById('loginEmail').value.trim();
-            const password = document.getElementById('loginPassword').value;
-            
-            if(!email || !password){
-              throw new Error('Please enter email and password');
-            }
-            
-            console.log('🔐 [AUTH] Logging in with email/password');
-            await Cloud.loginWithEmail(email, password);
-            console.log('✅ [AUTH] Login successful');
-            
-            document.getElementById('loginEmail').value = '';
-            document.getElementById('loginPassword').value = '';
-            document.getElementById('loginError').textContent = '';
-          }catch(e){
-            console.error('❌ [AUTH] Login failed:', e.message);
-            document.getElementById('loginError').textContent = e.message;
-            loginBtn.disabled = false;
-            loginBtn.textContent = 'Login';
-          }
-        };
-      }
-      
-      if(registerBtn){
-        registerBtn.onclick = async ()=>{
-          try{
-            registerBtn.disabled = true;
-            registerBtn.textContent = 'Creating account...';
-            const email = document.getElementById('registerEmail').value.trim();
-            const password = document.getElementById('registerPassword').value;
-            const confirm = document.getElementById('registerConfirm').value;
-            
-            if(!email || !password || !confirm){
-              throw new Error('Please fill all fields');
-            }
-            
-            if(password !== confirm){
-              throw new Error('Passwords do not match');
-            }
-            
-            console.log('📝 [AUTH] Registering new user');
-            await Cloud.registerWithEmail(email, password);
-            console.log('✅ [AUTH] Registration successful');
-            
-            document.getElementById('registerEmail').value = '';
-            document.getElementById('registerPassword').value = '';
-            document.getElementById('registerConfirm').value = '';
-            document.getElementById('registerError').textContent = '';
-            
-            // Auto-switch to login form
-            document.getElementById('registerForm').style.display = 'none';
-            document.getElementById('loginForm').style.display = 'block';
-            toast('Account created! Please log in.');
-          }catch(e){
-            console.error('❌ [AUTH] Registration failed:', e.message);
-            document.getElementById('registerError').textContent = e.message;
-            registerBtn.disabled = false;
-            registerBtn.textContent = 'Create Account';
-          }
-        };
-      }
-      
-      if(switchToRegister){
-        switchToRegister.onclick = ()=>{
-          document.getElementById('loginForm').style.display = 'none';
-          document.getElementById('registerForm').style.display = 'block';
-        };
-      }
-      
-      if(switchToLogin){
-        switchToLogin.onclick = ()=>{
-          document.getElementById('registerForm').style.display = 'none';
-          document.getElementById('loginForm').style.display = 'block';
-        };
-      }
+      setTimeout(wireAuthButtons, 100);
     }
   });
   
   console.log('🔍 [BOOT] Boot sequence complete, auth listener active');
 })();
+
+
+// Wire authentication buttons
+function wireAuthButtons(){
+  console.log('🔌 [AUTH] Wiring authentication buttons');
+  const loginBtn = document.getElementById('loginBtn');
+  const registerBtn = document.getElementById('registerBtn');
+  const switchToRegister = document.getElementById('switchToRegister');
+  const switchToLogin = document.getElementById('switchToLogin');
+  
+  if(loginBtn){
+    loginBtn.onclick = async ()=>{
+      try{
+        loginBtn.disabled = true;
+        const orig = loginBtn.textContent;
+        loginBtn.textContent = 'Signing in...';
+        const email = (document.getElementById('loginEmail').value || '').trim();
+        const password = document.getElementById('loginPassword').value || '';
+        if(!email || !password) throw new Error('Please enter email and password');
+        await Cloud.loginWithEmail(email, password);
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+        document.getElementById('loginError').textContent = '';
+      }catch(e){
+        document.getElementById('loginError').textContent = e.message;
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Login';
+      }
+    };
+  }
+  if(registerBtn){
+    registerBtn.onclick = async ()=>{
+      try{
+        registerBtn.disabled = true;
+        registerBtn.textContent = 'Creating account...';
+        const email = (document.getElementById('registerEmail').value || '').trim();
+        const password = document.getElementById('registerPassword').value || '';
+        const confirm = document.getElementById('registerConfirm').value || '';
+        if(!email || !password || !confirm) throw new Error('Please fill all fields');
+        if(password !== confirm) throw new Error('Passwords do not match');
+        await Cloud.registerWithEmail(email, password);
+        document.getElementById('registerEmail').value = '';
+        document.getElementById('registerPassword').value = '';
+        document.getElementById('registerConfirm').value = '';
+        document.getElementById('registerError').textContent = '';
+        document.getElementById('registerForm').style.display = 'none';
+        document.getElementById('loginForm').style.display = 'block';
+        toast('Account created! Please log in.');
+      }catch(e){
+        document.getElementById('registerError').textContent = e.message;
+        registerBtn.disabled = false;
+        registerBtn.textContent = 'Create Account';
+      }
+    };
+  }
+  if(switchToRegister){
+    switchToRegister.onclick = ()=>{
+      document.getElementById('loginForm').style.display = 'none';
+      document.getElementById('registerForm').style.display = 'block';
+    };
+  }
+  if(switchToLogin){
+    switchToLogin.onclick = ()=>{
+      document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('loginForm').style.display = 'block';
+    };
+  }
+  console.log('✅ [AUTH] Buttons wired');
+}
+
+// Wire authentication buttons - call after DOM is ready
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', wireAuthButtons);
+} else {
+  wireAuthButtons();
+}
