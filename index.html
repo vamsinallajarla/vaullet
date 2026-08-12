@@ -387,7 +387,8 @@ a{ color:var(--brass); }
 }
 .modal.modal-wide{ max-width:760px; }
 .modal.modal-fullscreen{
-  width:100vw; height:100vh; max-width:100vw; max-height:100vh;
+  width:100vw; height:100vh; height:100dvh;
+  max-width:100vw; max-height:100vh; max-height:100dvh;
   border-radius:0; display:flex; flex-direction:column; overflow:hidden;
 }
 .modal-header{
@@ -458,13 +459,25 @@ a{ color:var(--brass); }
 
 /* Preview modal — fills the screen so a document/photo has real room
    to be read, especially on phones where a capped-height popup left
-   everything cramped and effectively zoomed-out. */
+   everything cramped and effectively zoomed-out.
+   Media sizing uses position:absolute + inset:0 against a relatively
+   positioned flex child, rather than percentage max-height directly
+   on the <img>: mobile Safari frequently fails to resolve percentage
+   heights on replaced elements (img/video) inside a flex child whose
+   own height comes from flex-grow rather than an explicit value —
+   the image falls back to its natural size and only a cropped corner
+   ends up visible. Absolute positioning against inset:0 always
+   resolves correctly regardless of that flexbox quirk.  */
 .preview-media{
-  background:#0c0d10; display:flex; align-items:center; justify-content:center;
-  flex:1; min-height:0; overflow:auto;
+  background:#0c0d10;
+  flex:1; min-height:0; position:relative; overflow:hidden;
 }
-.preview-media img{ max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; border:none; }
-.preview-media iframe{ width:100%; height:100%; border:none; }
+.preview-media img{
+  position:absolute; inset:0; margin:auto;
+  max-width:100%; max-height:100%; width:auto; height:auto;
+  object-fit:contain; border:none;
+}
+.preview-media iframe{ position:absolute; inset:0; width:100%; height:100%; border:none; }
 
 /* Auth screen */
 .auth-screen{
